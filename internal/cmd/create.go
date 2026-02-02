@@ -180,13 +180,17 @@ func runCreateGasTown(name string) error {
 		return fmt.Errorf("failed to create GitHub repo: %w", err)
 	}
 
-	// Get repo URL (SSH format for gt inside VM)
-	getURL := exec.Command("gh", "repo", "view", name, "--json", "sshUrl", "-q", ".sshUrl")
+	// Get repo URL (HTTPS format - works without SSH keys for public repos)
+	getURL := exec.Command("gh", "repo", "view", name, "--json", "url", "-q", ".url")
 	urlOutput, err := getURL.Output()
 	if err != nil {
 		return fmt.Errorf("failed to get repo URL: %w", err)
 	}
 	repoURL := strings.TrimSpace(string(urlOutput))
+	// Convert to .git URL format
+	if !strings.HasSuffix(repoURL, ".git") {
+		repoURL = repoURL + ".git"
+	}
 	fmt.Printf("GitHub repo created: %s\n", repoURL)
 
 	// Step 2: Create local directory structure (rig will be built inside VM)

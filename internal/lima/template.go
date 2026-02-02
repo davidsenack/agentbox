@@ -443,16 +443,15 @@ echo "=========================================="
 }
 
 // generateProvisionScriptGasTown creates a provision script for Gas Town rigs
-// Sets up the environment and creates a setup script for first login
+// Builds the rig automatically during provisioning using HTTPS (no SSH needed for public repos)
 func generateProvisionScriptGasTown(cfg *config.Config, rigName string, repoURL string) string {
 	// Get the base provision script
 	baseScript := generateProvisionScript(cfg)
 
-	// Add Gas Town environment setup
-	// The actual rig creation happens via a setup script on first login
+	// Add Gas Town rig creation during provisioning
 	gasTownSetup := fmt.Sprintf(`
-# --- Gas Town Environment Setup ---
-echo "Setting up Gas Town environment..."
+# --- Gas Town Rig Setup ---
+echo "Setting up Gas Town rig..."
 RIG_NAME="%s"
 REPO_URL="%s"
 
@@ -465,110 +464,55 @@ if ! grep -q "GT_ROOT" /home/agent/.zshrc 2>/dev/null; then
     echo 'export GT_ROOT=/home/agent/gt' >> /home/agent/.zshrc
 fi
 
-# Create setup script that runs gt rig add
-# Note: Using quoted heredoc to prevent variable expansion, then substituting
-cat > /home/agent/.local/bin/setup-rig << 'SETUP_SCRIPT'
-#!/bin/bash
-set -e
+# Check if gt is available
+GT_BIN="/home/agent/go/bin/gt"
+if [ ! -x "$GT_BIN" ]; then
+    echo "ERROR: gt not found at $GT_BIN"
+    echo "Gas Town rig setup skipped - install gt and run: gt install ~/gt && gt rig add $RIG_NAME $REPO_URL"
+else
+    # First: Initialize Gas Town HQ (workspace)
+    # This creates the town structure that gt rig add requires
+    echo "Initializing Gas Town HQ..."
+    sudo -u agent bash -c "
+        export PATH='/usr/bin:/bin:/usr/local/bin:/home/agent/go/bin:/usr/local/go/bin:\$PATH'
+        export GOPATH=/home/agent/go
+        export HOME=/home/agent
+        cd /home/agent/gt
+        $GT_BIN install . --name agentbox --git 2>&1
+    " && {
+        echo "Gas Town HQ initialized!"
+    } || {
+        echo "Warning: gt install failed"
+    }
 
-RIG_NAME="__RIG_NAME__"
-REPO_URL="__REPO_URL__"
-GT_ROOT="${GT_ROOT:-/home/agent/gt}"
-
-echo "Setting up Gas Town rig: $RIG_NAME"
-echo "Repository: $REPO_URL"
-echo ""
-
-# Check if rig already exists
-if [ -d "$GT_ROOT/$RIG_NAME/mayor" ]; then
-    echo "Rig already exists at $GT_ROOT/$RIG_NAME"
-    exit 0
+    # Second: Add the rig to the workspace
+    echo "Creating Gas Town rig: $RIG_NAME"
+    echo "Repository: $REPO_URL"
+    sudo -u agent bash -c "
+        export PATH='/usr/bin:/bin:/usr/local/bin:/home/agent/go/bin:/usr/local/go/bin:\$PATH'
+        export GT_ROOT=/home/agent/gt
+        export GOPATH=/home/agent/go
+        export HOME=/home/agent
+        cd /home/agent/gt
+        $GT_BIN rig add '$RIG_NAME' '$REPO_URL' 2>&1
+    " && {
+        echo "Gas Town rig '$RIG_NAME' created successfully!"
+    } || {
+        echo "Warning: gt rig add failed"
+        echo "You can manually run: cd ~/gt && gt rig add $RIG_NAME $REPO_URL"
+    }
 fi
-
-# Generate SSH key if needed
-if [ ! -f ~/.ssh/id_ed25519 ]; then
-    echo "No SSH key found. Generating one..."
-    mkdir -p ~/.ssh
-    ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -q
-    echo ""
-    echo "=== SSH PUBLIC KEY ==="
-    echo "Add this key to your GitHub account:"
-    echo ""
-    cat ~/.ssh/id_ed25519.pub
-    echo ""
-    echo "Then run this script again: setup-rig"
-    echo "======================="
-    exit 0
-fi
-
-# Add GitHub to known hosts
-mkdir -p ~/.ssh
-ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null || true
-
-# Try to clone to verify SSH access
-echo "Testing GitHub access..."
-if ! ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
-    echo ""
-    echo "=== SSH KEY NOT CONFIGURED ==="
-    echo "Your SSH key is not added to GitHub."
-    echo "Add this key to your GitHub account:"
-    echo ""
-    cat ~/.ssh/id_ed25519.pub
-    echo ""
-    echo "Then run: setup-rig"
-    echo "=============================="
-    exit 1
-fi
-
-# Create the rig
-cd "$GT_ROOT"
-echo "Creating rig..."
-gt rig add "$RIG_NAME" "$REPO_URL"
-
-echo ""
-echo "=== Rig created successfully! ==="
-echo "Run: gt mayor attach"
-echo "================================="
-SETUP_SCRIPT
-# Substitute placeholders with actual values
-sed -i "s|__RIG_NAME__|$RIG_NAME|g" /home/agent/.local/bin/setup-rig
-sed -i "s|__REPO_URL__|$REPO_URL|g" /home/agent/.local/bin/setup-rig
-chmod +x /home/agent/.local/bin/setup-rig
-chown agent:agent /home/agent/.local/bin/setup-rig
-
-# Create a simpler version that auto-runs on first login
-cat > /home/agent/.setup-rig-info << EOF
-RIG_NAME=$RIG_NAME
-REPO_URL=$REPO_URL
-EOF
-chown agent:agent /home/agent/.setup-rig-info
-
-# Add first-login hint to .zshrc
-cat >> /home/agent/.zshrc << 'FIRSTLOGIN'
-
-# Gas Town first-login setup
-if [ -f ~/.setup-rig-info ] && [ ! -d "$GT_ROOT/*/mayor" ]; then
-    source ~/.setup-rig-info
-    echo ""
-    echo "╔════════════════════════════════════════════════════╗"
-    echo "║  Gas Town rig not yet configured                   ║"
-    echo "║  Run: setup-rig                                    ║"
-    echo "╚════════════════════════════════════════════════════╝"
-    echo ""
-fi
-FIRSTLOGIN
 
 # Add useful aliases
 if ! grep -q "alias crew=" /home/agent/.zshrc 2>/dev/null; then
     echo 'alias crew="cd \$GT_ROOT/*/crew 2>/dev/null || cd \$GT_ROOT"' >> /home/agent/.zshrc
 fi
 
-# Set default working directory to gt root
-echo 'cd /home/agent/gt 2>/dev/null || true' >> /home/agent/.zshrc
+# Set default working directory to the rig
+echo 'cd /home/agent/gt/%s 2>/dev/null || cd /home/agent/gt || true' >> /home/agent/.zshrc
 
-echo "Gas Town environment setup complete"
-echo "User should run 'setup-rig' on first login"
-`, rigName, repoURL)
+echo "Gas Town setup complete"
+`, rigName, repoURL, rigName)
 
 	// Insert the Gas Town setup before the "Mark Ready" section
 	return strings.Replace(baseScript, "# --- Mark Ready ---", gasTownSetup+"\n# --- Mark Ready ---", 1)
