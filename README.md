@@ -95,6 +95,7 @@ The ANTHROPIC_API_KEY never enters the VM. Instead:
 | `agentbox create <name>` | Create a new sandbox project |
 | `agentbox create <name> --github` | Create project with a private GitHub repo |
 | `agentbox create <name> --github --public` | Create project with a public GitHub repo |
+| `agentbox create <name> --gastown` | Create as a Gas Town rig (implies --github) |
 | `agentbox enter <name>` | Enter the sandbox (starts VM + proxy) |
 | `agentbox stop <name>` | Stop the VM without destroying it |
 | `agentbox reset <name>` | Destroy VM and recreate (preserves workspace) |

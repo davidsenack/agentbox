@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	createGitHub bool
-	createPublic bool
+	createGitHub  bool
+	createPublic  bool
+	createGasTown bool
 )
 
 var createCmd = &cobra.Command{
@@ -27,11 +28,13 @@ This command:
   2. Generates default agentbox.yaml configuration
   3. Provisions a Lima VM (stopped)
   4. Optionally creates a GitHub repo for the project
+  5. Optionally registers as a Gas Town rig
 
 Example:
   agentbox create myproject
   agentbox create myproject --github           # Create with private GitHub repo
-  agentbox create myproject --github --public  # Create with public GitHub repo`,
+  agentbox create myproject --github --public  # Create with public GitHub repo
+  agentbox create myproject --gastown          # Create as Gas Town rig (implies --github)`,
 	Args: cobra.ExactArgs(1),
 	RunE: runCreate,
 }
@@ -39,6 +42,7 @@ Example:
 func init() {
 	createCmd.Flags().BoolVar(&createGitHub, "github", false, "Create a GitHub repository for the project")
 	createCmd.Flags().BoolVar(&createPublic, "public", false, "Make the GitHub repo public (default: private)")
+	createCmd.Flags().BoolVar(&createGasTown, "gastown", false, "Register as a Gas Town rig (implies --github)")
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
@@ -87,10 +91,25 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create .gitignore: %w", err)
 	}
 
+	// Gas Town implies GitHub
+	if createGasTown {
+		createGitHub = true
+	}
+
 	// Create GitHub repo if requested
+	var repoURL string
 	if createGitHub {
-		if err := setupGitHubRepo(name); err != nil {
+		var err error
+		repoURL, err = setupGitHubRepo(name)
+		if err != nil {
 			return fmt.Errorf("failed to setup GitHub repo: %w", err)
+		}
+	}
+
+	// Register as Gas Town rig if requested
+	if createGasTown {
+		if err := setupGasTownRig(name, repoURL); err != nil {
+			return fmt.Errorf("failed to setup Gas Town rig: %w", err)
 		}
 	}
 
@@ -133,18 +152,19 @@ func runCreate(cmd *cobra.Command, args []string) error {
 }
 
 // setupGitHubRepo creates a GitHub repo and initializes git in the workspace
-func setupGitHubRepo(name string) error {
+// Returns the repo URL for use with Gas Town
+func setupGitHubRepo(name string) (string, error) {
 	workspacePath := filepath.Join(name, "workspace")
 
 	// Check if gh CLI is available
 	if _, err := exec.LookPath("gh"); err != nil {
-		return fmt.Errorf("gh CLI not found. Install with: brew install gh")
+		return "", fmt.Errorf("gh CLI not found. Install with: brew install gh")
 	}
 
 	// Check if user is authenticated
 	authCheck := exec.Command("gh", "auth", "status")
 	if err := authCheck.Run(); err != nil {
-		return fmt.Errorf("not authenticated with GitHub. Run: gh auth login")
+		return "", fmt.Errorf("not authenticated with GitHub. Run: gh auth login")
 	}
 
 	fmt.Printf("Creating GitHub repository: %s\n", name)
@@ -161,7 +181,7 @@ func setupGitHubRepo(name string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to create GitHub repo: %w", err)
+		return "", fmt.Errorf("failed to create GitHub repo: %w", err)
 	}
 
 	// Create a .gitignore in workspace
@@ -190,21 +210,21 @@ Thumbs.db
 # *.pyc
 `
 	if err := os.WriteFile(workspaceGitignore, []byte(gitignoreContent), 0644); err != nil {
-		return fmt.Errorf("failed to create workspace .gitignore: %w", err)
+		return "", fmt.Errorf("failed to create workspace .gitignore: %w", err)
 	}
 
 	// Create initial README in workspace
 	readmePath := filepath.Join(workspacePath, "README.md")
 	readmeContent := fmt.Sprintf("# %s\n\nProject created with [AgentBox](https://github.com/davidsenack/agentbox).\n", name)
 	if err := os.WriteFile(readmePath, []byte(readmeContent), 0644); err != nil {
-		return fmt.Errorf("failed to create README: %w", err)
+		return "", fmt.Errorf("failed to create README: %w", err)
 	}
 
 	// Stage and commit the initial files
 	gitAdd := exec.Command("git", "add", ".")
 	gitAdd.Dir = workspacePath
 	if err := gitAdd.Run(); err != nil {
-		return fmt.Errorf("failed to stage files: %w", err)
+		return "", fmt.Errorf("failed to stage files: %w", err)
 	}
 
 	gitCommit := exec.Command("git", "commit", "-m", "Initial commit\n\nCreated with AgentBox")
@@ -212,7 +232,7 @@ Thumbs.db
 	if err := gitCommit.Run(); err != nil {
 		// Ignore if nothing to commit
 		if !strings.Contains(err.Error(), "nothing to commit") {
-			return fmt.Errorf("failed to commit: %w", err)
+			return "", fmt.Errorf("failed to commit: %w", err)
 		}
 	}
 
@@ -226,12 +246,45 @@ Thumbs.db
 		fmt.Println("You can push manually later with: git push -u origin main")
 	}
 
-	// Get the repo URL
-	getURL := exec.Command("gh", "repo", "view", name, "--json", "url", "-q", ".url")
+	// Get the repo URL (SSH format for gt rig add)
+	getURL := exec.Command("gh", "repo", "view", name, "--json", "sshUrl", "-q", ".sshUrl")
 	urlOutput, err := getURL.Output()
-	if err == nil {
-		fmt.Printf("GitHub repo created: %s\n", strings.TrimSpace(string(urlOutput)))
+	repoURL := strings.TrimSpace(string(urlOutput))
+	if err != nil || repoURL == "" {
+		// Fallback to HTTPS URL
+		getURL = exec.Command("gh", "repo", "view", name, "--json", "url", "-q", ".url")
+		urlOutput, _ = getURL.Output()
+		repoURL = strings.TrimSpace(string(urlOutput))
 	}
 
+	if repoURL != "" {
+		fmt.Printf("GitHub repo created: %s\n", repoURL)
+	}
+
+	return repoURL, nil
+}
+
+// setupGasTownRig registers the project as a Gas Town rig
+func setupGasTownRig(name, repoURL string) error {
+	// Check if gt CLI is available
+	if _, err := exec.LookPath("gt"); err != nil {
+		return fmt.Errorf("gt CLI not found. Install Gas Town first")
+	}
+
+	if repoURL == "" {
+		return fmt.Errorf("no repository URL available for Gas Town rig")
+	}
+
+	fmt.Printf("Registering Gas Town rig: %s\n", name)
+
+	// Run gt rig add
+	cmd := exec.Command("gt", "rig", "add", name, repoURL)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to register Gas Town rig: %w", err)
+	}
+
+	fmt.Printf("Gas Town rig registered: %s\n", name)
 	return nil
 }
