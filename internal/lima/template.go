@@ -25,6 +25,12 @@ memory: "{{ .Config.VM.Memory }}"
 disk: "{{ .Config.VM.Disk }}"
 
 images:
+  # Pre-built AgentBox images with all tools installed
+  - location: "https://github.com/davidsenack/agentbox/releases/download/image-v1.0.0/agentbox-ubuntu-24.04-arm64.qcow2"
+    arch: "aarch64"
+  - location: "https://github.com/davidsenack/agentbox/releases/download/image-v1.0.0/agentbox-ubuntu-24.04-amd64.qcow2"
+    arch: "x86_64"
+  # Fallback to stock Ubuntu if pre-built image unavailable
   - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
     arch: "aarch64"
   - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
@@ -131,14 +137,21 @@ set -euo pipefail
 
 # =============================================================================
 # AgentBox Guest Provisioning Script
-# Network is OPEN - proxy is used for API key injection only
+# Detects pre-built image vs stock Ubuntu and provisions accordingly
 # =============================================================================
 
 export DEBIAN_FRONTEND=noninteractive
 
 echo "Starting AgentBox provisioning..."
 
-# --- User Creation ---
+# Check if running on pre-built AgentBox image
+PREBUILT=false
+if [ -f /etc/agentbox-image ]; then
+    PREBUILT=true
+    echo "Detected pre-built AgentBox image - fast provisioning mode"
+fi
+
+# --- User Creation (only if not pre-built) ---
 if ! id -u agent >/dev/null 2>&1; then
     echo "Creating agent user..."
     useradd -m -s /bin/zsh -G sudo agent
@@ -147,8 +160,6 @@ if ! id -u agent >/dev/null 2>&1; then
 fi
 
 # --- Proxy Configuration ---
-# Proxy is optional - used for API key injection to configured hosts
-# Get host gateway from default route (try lima0 first, fall back to any default)
 HOST_GATEWAY=$(ip route | grep "default.*lima0" | head -1 | awk '{print $3}' || true)
 if [ -z "$HOST_GATEWAY" ]; then
     HOST_GATEWAY=$(ip route | grep default | head -1 | awk '{print $3}' || true)
@@ -158,7 +169,7 @@ PROXY_URL="http://${HOST_GATEWAY}:${PROXY_PORT}"
 
 echo "Configuring proxy: ${PROXY_URL}"
 
-# Set system-wide proxy in /etc/environment (read by PAM for all shells)
+# Set proxy in environment
 cat >> /etc/environment << EOF
 HTTP_PROXY="${PROXY_URL}"
 HTTPS_PROXY="${PROXY_URL}"
@@ -166,153 +177,95 @@ http_proxy="${PROXY_URL}"
 https_proxy="${PROXY_URL}"
 NO_PROXY="localhost,127.0.0.1,::1"
 no_proxy="localhost,127.0.0.1,::1"
+AGENTBOX_PROXY="${PROXY_URL}"
 EOF
 
 # Export for current script
 export HTTP_PROXY="${PROXY_URL}"
 export HTTPS_PROXY="${PROXY_URL}"
-export http_proxy="${PROXY_URL}"
-export https_proxy="${PROXY_URL}"
 
-# --- System Packages ---
-echo "Installing system packages..."
-apt-get update
-apt-get install -y \
-    zsh \
-    build-essential \
-    curl \
-    wget \
-    git \
-    jq \
-    ripgrep \
-    fzf \
-    tmux \
-    neovim \
-    unzip \
-    ca-certificates \
-    gnupg
+# --- Full provisioning only if not pre-built ---
+if [ "$PREBUILT" = false ]; then
+    echo "Stock Ubuntu detected - installing all packages (this takes a while)..."
 
-# --- Node.js (via NodeSource for latest LTS) ---
-echo "Installing Node.js..."
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
-echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
-apt-get update
-apt-get install -y nodejs
+    # System Packages
+    apt-get update
+    apt-get install -y \
+        zsh build-essential curl wget git jq ripgrep fzf tmux neovim \
+        unzip ca-certificates gnupg python3 python3-pip python3-venv
 
-# --- Python 3 ---
-echo "Installing Python..."
-apt-get install -y python3 python3-pip python3-venv
+    # Node.js
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+    apt-get update && apt-get install -y nodejs
 
-# --- Go ---
-echo "Installing Go..."
-GO_VERSION="1.22.0"
-ARCH=$(dpkg --print-architecture)
-curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" | tar -C /usr/local -xzf -
-echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh
+    # Go
+    GO_VERSION="1.22.0"
+    ARCH=$(dpkg --print-architecture)
+    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" | tar -C /usr/local -xzf -
+    echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh
 
-# --- Starship Prompt ---
-echo "Installing Starship..."
-curl -fsSL https://starship.rs/install.sh | sh -s -- -y
+    # Starship
+    curl -fsSL https://starship.rs/install.sh | sh -s -- -y
 
-# --- mise (version manager) ---
-echo "Installing mise..."
-curl -fsSL https://mise.run | sh
-mv /root/.local/bin/mise /usr/local/bin/mise 2>/dev/null || true
+    # mise
+    curl -fsSL https://mise.run | sh
+    mv /root/.local/bin/mise /usr/local/bin/mise 2>/dev/null || true
 
-# --- Agent User Setup ---
-echo "Configuring agent environment..."
+    # Set zsh as default
+    chsh -s /bin/zsh agent
 
-# Set zsh as default shell
-chsh -s /bin/zsh agent
+    # Agent directories
+    sudo -u agent mkdir -p /home/agent/.local/bin /home/agent/.config/nvim /home/agent/go/bin
 
-# Create agent directories
-sudo -u agent mkdir -p /home/agent/.local/bin
-sudo -u agent mkdir -p /home/agent/.config/nvim
+    # Oh My Zsh
+    sudo -u agent sh -c 'RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
 
-# --- Oh My Zsh ---
-echo "Installing Oh My Zsh..."
-sudo -u agent sh -c 'RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
-
-# --- Agent .zshrc ---
-cat > /home/agent/.zshrc << 'ZSHRC'
-# AgentBox zsh configuration
+    # .zshrc
+    cat > /home/agent/.zshrc << 'ZSHRC'
 export ZSH="$HOME/.oh-my-zsh"
 ZSH_THEME="robbyrussell"
 plugins=(git fzf)
 source $ZSH/oh-my-zsh.sh
-
-# Environment
-export PATH="$HOME/.local/bin:/usr/local/go/bin:$PATH"
+export PATH="$HOME/.local/bin:/usr/local/go/bin:$HOME/go/bin:$PATH"
 export GOPATH="$HOME/go"
-export PATH="$GOPATH/bin:$PATH"
-
-# Proxy (for API key injection)
-if [ -f /etc/environment ]; then
-    export $(grep -v '^#' /etc/environment | xargs)
-fi
-
-# Starship prompt
+if [ -f /etc/environment ]; then export $(grep -v '^#' /etc/environment | xargs); fi
 eval "$(starship init zsh)"
-
-# mise (version manager)
-if command -v mise &> /dev/null; then
-    eval "$(mise activate zsh)"
-fi
-
-# Start in workspace
+command -v mise &>/dev/null && eval "$(mise activate zsh)"
 cd /workspace 2>/dev/null || true
 ZSHRC
+    chown agent:agent /home/agent/.zshrc
 
-chown agent:agent /home/agent/.zshrc
-
-# --- Neovim Config ---
-cat > /home/agent/.config/nvim/init.lua << 'NVIMCONFIG'
--- AgentBox Neovim configuration
+    # Neovim config
+    cat > /home/agent/.config/nvim/init.lua << 'NVIM'
 vim.opt.number = true
 vim.opt.relativenumber = true
 vim.opt.expandtab = true
 vim.opt.tabstop = 4
 vim.opt.shiftwidth = 4
 vim.opt.smartindent = true
-vim.opt.wrap = false
-vim.opt.cursorline = true
 vim.opt.termguicolors = true
-vim.opt.signcolumn = "yes"
 vim.opt.clipboard = "unnamedplus"
-vim.opt.ignorecase = true
-vim.opt.smartcase = true
-
--- Key mappings
 vim.g.mapleader = " "
-vim.keymap.set("n", "<leader>w", ":w<CR>")
-vim.keymap.set("n", "<leader>q", ":q<CR>")
-NVIMCONFIG
+NVIM
+    chown -R agent:agent /home/agent/.config
 
-chown -R agent:agent /home/agent/.config
-
-# --- Install AI Tools as agent user ---
-echo "Installing AI coding tools..."
-
-# claude-code
-sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; npm install -g @anthropic-ai/claude-code' || echo "claude-code install failed (may need API key)"
-
-# opencode
-sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; /usr/local/go/bin/go install github.com/opencode-ai/opencode@latest' || echo "opencode install failed"
-
-# --- Mount Permissions ---
-echo "Mount points ready: /workspace, /artifacts"
+    # AI tools
+    sudo -u agent npm install -g @anthropic-ai/claude-code 2>/dev/null || true
+    sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH" GOPATH="$HOME/go"; go install github.com/opencode-ai/opencode@latest' 2>/dev/null || true
+fi
 
 # --- Mark Ready ---
 touch /etc/agentbox-ready
 echo ""
 echo "=========================================="
 echo "AgentBox provisioning complete!"
-echo "=========================================="
-echo "Installed: zsh, oh-my-zsh, starship, tmux"
-echo "Installed: node, python, go, mise"
-echo "Installed: neovim, ripgrep, fzf, jq"
-echo "Installed: claude-code, opencode"
+if [ "$PREBUILT" = true ]; then
+    echo "(Pre-built image - fast mode)"
+else
+    echo "(Full install from stock Ubuntu)"
+fi
 echo "=========================================="
 `, cfg.Network.ProxyPort)
 }
