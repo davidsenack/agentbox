@@ -1,93 +1,44 @@
-name: Build AgentBox Image
+name: Release AgentBox Image
+
+# NOTE: GitHub Actions runners don't support nested virtualization,
+# so images must be built locally. This workflow creates releases
+# from locally-built artifacts.
+#
+# To release a new image:
+# 1. Build images locally: cd build && ./build-image.sh arm64 && ./build-image.sh amd64
+# 2. Create a release draft on GitHub
+# 3. Upload the .qcow2 and .sha256 files from build/output/
+# 4. Publish the release
+#
+# Alternatively, use the manual workflow dispatch with pre-uploaded artifacts.
 
 on:
-  push:
-    tags:
-      - 'image-v*'
   workflow_dispatch:
     inputs:
       version:
         description: 'Image version (e.g., 1.0.0)'
         required: true
         default: '1.0.0'
+      release_notes:
+        description: 'Additional release notes'
+        required: false
+        default: ''
 
 jobs:
-  build-arm64:
-    runs-on: macos-14  # M1 runner for arm64
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Lima
-        run: brew install lima qemu
-
-      - name: Build arm64 image
-        run: |
-          chmod +x build/build-image.sh
-          chmod +x build/provision.sh
-          cd build && ./build-image.sh arm64
-
-      - name: Upload arm64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: agentbox-arm64
-          path: build/output/agentbox-ubuntu-24.04-arm64.qcow2*
-
-  build-amd64:
-    runs-on: macos-13  # Intel runner for amd64
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Lima
-        run: brew install lima qemu
-
-      - name: Build amd64 image
-        run: |
-          chmod +x build/build-image.sh
-          chmod +x build/provision.sh
-          cd build && ./build-image.sh amd64
-
-      - name: Upload amd64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: agentbox-amd64
-          path: build/output/agentbox-ubuntu-24.04-amd64.qcow2*
-
-  release:
-    needs: [build-arm64, build-amd64]
+  create-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download arm64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: agentbox-arm64
-          path: ./artifacts/
-
-      - name: Download amd64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: agentbox-amd64
-          path: ./artifacts/
-
-      - name: Get version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/image-v}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: image-v${{ steps.version.outputs.version }}
-          name: AgentBox Image v${{ steps.version.outputs.version }}
+          tag_name: image-v${{ github.event.inputs.version }}
+          name: AgentBox Image v${{ github.event.inputs.version }}
           body: |
-            ## AgentBox Pre-built Image v${{ steps.version.outputs.version }}
+            ## AgentBox Pre-built Image v${{ github.event.inputs.version }}
 
             Pre-provisioned Ubuntu 24.04 image with:
             - zsh + Oh My Zsh + Starship
@@ -102,7 +53,14 @@ jobs:
 
             ### Checksums
             See `.sha256` files for verification.
-          files: |
-            artifacts/*
-          draft: false
+
+            ### Building Images Locally
+            ```bash
+            cd build
+            ./build-image.sh arm64  # For Apple Silicon
+            ./build-image.sh amd64  # For Intel
+            ```
+
+            ${{ github.event.inputs.release_notes }}
+          draft: true
           prerelease: false

@@ -4,7 +4,9 @@ set -euo pipefail
 # =============================================================================
 # AgentBox Image Builder
 # Uses Lima to build a pre-provisioned disk image
-# Uses QEMU for CI compatibility (VZ doesn't work in GitHub Actions)
+#
+# NOTE: This script must be run locally on macOS with Lima installed.
+# GitHub Actions runners don't support the required virtualization.
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,10 +17,8 @@ ARCH="${1:-$(uname -m)}"
 # Normalize arch names
 if [ "$ARCH" = "x86_64" ]; then
     ARCH="amd64"
-    LIMA_ARCH="x86_64"
 elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
     ARCH="arm64"
-    LIMA_ARCH="aarch64"
 else
     echo "Unsupported architecture: $ARCH"
     exit 1
@@ -29,16 +29,26 @@ echo "AgentBox Image Builder"
 echo "Architecture: $ARCH"
 echo "=========================================="
 
+# Check for Lima
+if ! command -v limactl &> /dev/null; then
+    echo "Error: Lima is not installed. Install with: brew install lima"
+    exit 1
+fi
+
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
 # Create temporary Lima config for building
-# Use QEMU for CI compatibility (VZ requires special entitlements)
+# Use VZ (Apple Virtualization.framework) for best performance on macOS
 LIMA_CONFIG=$(mktemp)
 cat > "$LIMA_CONFIG" << EOF
 # Temporary Lima config for building AgentBox image
-# Uses QEMU for CI compatibility
-vmType: "qemu"
+vmType: "vz"
+vmOpts:
+  vz:
+    rosetta:
+      enabled: true
+      binfmt: true
 
 cpus: 4
 memory: "8GiB"
