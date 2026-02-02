@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/davidsenack/agentbox/internal/config"
@@ -23,7 +25,9 @@ var deleteCmd = &cobra.Command{
 This command:
   1. Stops the VM if running
   2. Destroys the VM and its disk
-  3. Deletes the entire project directory (including workspace and artifacts)
+  3. Deletes the GitHub repository (if created with --github or --gastown)
+  4. Removes any Gas Town rig (if gt is installed)
+  5. Deletes the entire project directory (including workspace and artifacts)
 
 WARNING: This is destructive and cannot be undone!
 
@@ -84,6 +88,37 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Deleting VM: %s\n", vmName)
 		if err := mgr.Delete(vmName); err != nil {
 			return fmt.Errorf("failed to delete VM: %w", err)
+		}
+	}
+
+	// Try to delete GitHub repo if it exists
+	// Check if gh CLI is available and user is authenticated
+	if _, err := exec.LookPath("gh"); err == nil {
+		authCheck := exec.Command("gh", "auth", "status")
+		if authCheck.Run() == nil {
+			// Check if repo exists by trying to view it
+			viewCmd := exec.Command("gh", "repo", "view", name, "--json", "name")
+			if viewCmd.Run() == nil {
+				fmt.Printf("Deleting GitHub repository: %s\n", name)
+				deleteCmd := exec.Command("gh", "repo", "delete", name, "--yes")
+				if err := deleteCmd.Run(); err != nil {
+					fmt.Printf("Warning: failed to delete GitHub repo: %v\n", err)
+				}
+			}
+		}
+	}
+
+	// Try to remove Gas Town rig if gt is available
+	if _, err := exec.LookPath("gt"); err == nil {
+		// Check if this is a Gas Town rig by looking for .beads directory
+		beadsDir := filepath.Join(name, ".beads")
+		if _, err := os.Stat(beadsDir); err == nil {
+			fmt.Printf("Removing Gas Town rig: %s\n", name)
+			removeCmd := exec.Command("gt", "rig", "remove", name, "--force")
+			if err := removeCmd.Run(); err != nil {
+				// Not a fatal error - we'll delete the directory anyway
+				fmt.Printf("Warning: failed to remove Gas Town rig: %v\n", err)
+			}
 		}
 	}
 

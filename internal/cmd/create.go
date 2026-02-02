@@ -142,22 +142,24 @@ func runCreate(cmd *cobra.Command, args []string) error {
 }
 
 // runCreateGasTown handles project creation for Gas Town mode
-// Flow: create GitHub repo -> gt rig add -> add agentbox config to rig
+// Flow: create GitHub repo -> create directory -> create VM -> rig is built inside VM on first boot
 func runCreateGasTown(name string) error {
 	fmt.Printf("Creating AgentBox + Gas Town project: %s\n", name)
 
-	// Check prerequisites
+	// Check prerequisites - only need gh CLI on host, gt runs inside VM
 	if _, err := exec.LookPath("gh"); err != nil {
 		return fmt.Errorf("gh CLI not found. Install with: brew install gh")
-	}
-	if _, err := exec.LookPath("gt"); err != nil {
-		return fmt.Errorf("gt CLI not found. Install Gas Town first")
 	}
 
 	// Check GitHub auth
 	authCheck := exec.Command("gh", "auth", "status")
 	if err := authCheck.Run(); err != nil {
 		return fmt.Errorf("not authenticated with GitHub. Run: gh auth login")
+	}
+
+	// Check if directory already exists
+	if _, err := os.Stat(name); err == nil {
+		return fmt.Errorf("directory %q already exists", name)
 	}
 
 	// Step 1: Create empty GitHub repo
@@ -178,7 +180,7 @@ func runCreateGasTown(name string) error {
 		return fmt.Errorf("failed to create GitHub repo: %w", err)
 	}
 
-	// Get repo URL (SSH format for gt)
+	// Get repo URL (SSH format for gt inside VM)
 	getURL := exec.Command("gh", "repo", "view", name, "--json", "sshUrl", "-q", ".sshUrl")
 	urlOutput, err := getURL.Output()
 	if err != nil {
@@ -187,53 +189,61 @@ func runCreateGasTown(name string) error {
 	repoURL := strings.TrimSpace(string(urlOutput))
 	fmt.Printf("GitHub repo created: %s\n", repoURL)
 
-	// Step 2: Register as Gas Town rig
-	fmt.Printf("Registering Gas Town rig: %s\n", name)
-	gtRigAdd := exec.Command("gt", "rig", "add", name, repoURL)
-	gtRigAdd.Stdout = os.Stdout
-	gtRigAdd.Stderr = os.Stderr
-	if err := gtRigAdd.Run(); err != nil {
-		return fmt.Errorf("failed to register Gas Town rig: %w", err)
+	// Step 2: Create local directory structure (rig will be built inside VM)
+	fmt.Printf("Creating project directory: %s\n", name)
+	dirs := []string{
+		name,
+		filepath.Join(name, ".agentbox"),
+		filepath.Join(name, "workspace"),
+		filepath.Join(name, "artifacts"),
 	}
 
-	// Step 3: Add agentbox config to the rig
-	// The rig is created in the current town, find it
-	rigPath := name // gt rig add creates it in cwd or town root
-
-	// Create .agentbox directory and artifacts in the rig
-	agentboxDir := filepath.Join(rigPath, ".agentbox")
-	artifactsDir := filepath.Join(rigPath, "artifacts")
-	if err := os.MkdirAll(agentboxDir, 0755); err != nil {
-		return fmt.Errorf("failed to create .agentbox directory: %w", err)
-	}
-	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
-		return fmt.Errorf("failed to create artifacts directory: %w", err)
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
 	}
 
-	// Create default config - workspace points to crew/ directory
+	// Create .gitkeep files
+	for _, dir := range []string{"workspace", "artifacts"} {
+		gitkeep := filepath.Join(name, dir, ".gitkeep")
+		if err := os.WriteFile(gitkeep, []byte{}, 0644); err != nil {
+			return fmt.Errorf("failed to create .gitkeep: %w", err)
+		}
+	}
+
+	// Create .gitignore
+	gitignore := filepath.Join(name, ".gitignore")
+	gitignoreContent := `.agentbox/
+`
+	if err := os.WriteFile(gitignore, []byte(gitignoreContent), 0644); err != nil {
+		return fmt.Errorf("failed to create .gitignore: %w", err)
+	}
+
+	// Create default config
 	cfg := config.DefaultConfig()
-	if err := config.Save(rigPath, cfg); err != nil {
+	if err := config.Save(name, cfg); err != nil {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 
 	// Get absolute path for Lima template
-	absPath, err := filepath.Abs(rigPath)
+	absPath, err := filepath.Abs(name)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path: %w", err)
 	}
 
-	// Generate Lima template - workspace is crew/ for Gas Town rigs
-	limaTemplate, err := lima.GenerateTemplateGasTown(cfg, absPath)
+	// Step 3: Generate Lima template - passes repo URL so rig is built inside VM
+	limaTemplate, err := lima.GenerateTemplateGasTown(cfg, absPath, name, repoURL)
 	if err != nil {
 		return fmt.Errorf("failed to generate Lima template: %w", err)
 	}
 
-	templatePath := filepath.Join(rigPath, ".agentbox", "lima.yaml")
+	templatePath := filepath.Join(name, ".agentbox", "lima.yaml")
 	if err := os.WriteFile(templatePath, []byte(limaTemplate), 0600); err != nil {
 		return fmt.Errorf("failed to write Lima template: %w", err)
 	}
 
-	// Create Lima VM
+	// Step 4: Create Lima VM
 	mgr := lima.NewManager()
 	vmName := lima.VMName(name)
 
@@ -246,7 +256,8 @@ func runCreateGasTown(name string) error {
 	fmt.Printf("Next steps:\n")
 	fmt.Printf("  cd %s\n", name)
 	fmt.Printf("  agentbox enter %s\n", name)
-	fmt.Printf("\nGas Town rig is ready. Crew workspaces mount to /workspace in the VM.\n")
+	fmt.Printf("\nThe Gas Town rig will be built inside the VM on first boot.\n")
+	fmt.Printf("Once inside, run 'gt mayor attach' to start working.\n")
 
 	return nil
 }

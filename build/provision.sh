@@ -34,7 +34,9 @@ apt-get install -y \
     ca-certificates \
     gnupg \
     sudo \
-    openssh-server
+    openssh-server \
+    libicu-dev \
+    pkg-config
 
 # --- Node.js (via NodeSource for latest LTS) ---
 echo "Installing Node.js..."
@@ -223,7 +225,7 @@ sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HO
 # Gas Town (gt and bd CLIs)
 echo "Installing Gas Town..."
 sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; /usr/local/go/bin/go install github.com/steveyegge/gastown/cmd/gt@latest' || echo "Warning: gt installation failed"
-sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; /usr/local/go/bin/go install github.com/steveyegge/beads/cmd/bd@latest' || echo "Warning: bd installation failed"
+sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; CGO_ENABLED=1 /usr/local/go/bin/go install github.com/steveyegge/beads/cmd/bd@latest' || echo "Warning: bd installation failed"
 
 # --- Cleanup ---
 echo "Cleaning up..."

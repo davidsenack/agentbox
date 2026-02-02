@@ -132,8 +132,8 @@ func GenerateTemplate(cfg *config.Config, projectDir string) (string, error) {
 }
 
 // GenerateTemplateGasTown creates a Lima YAML template for Gas Town rigs
-// The workspace is mounted from crew/ directory instead of workspace/
-func GenerateTemplateGasTown(cfg *config.Config, rigDir string) (string, error) {
+// The rig is built inside the VM on first boot using the provided repo URL
+func GenerateTemplateGasTown(cfg *config.Config, projectDir string, rigName string, repoURL string) (string, error) {
 	funcMap := template.FuncMap{
 		"indent": func(spaces int, v string) string {
 			return indent(spaces, v)
@@ -145,7 +145,8 @@ func GenerateTemplateGasTown(cfg *config.Config, rigDir string) (string, error) 
 		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
 
-	provisionScript := generateProvisionScript(cfg)
+	// Use Gas Town specific provision script with repo URL
+	provisionScript := generateProvisionScriptGasTown(cfg, rigName, repoURL)
 
 	data := struct {
 		Config          *config.Config
@@ -154,8 +155,8 @@ func GenerateTemplateGasTown(cfg *config.Config, rigDir string) (string, error) 
 		ProvisionScript string
 	}{
 		Config:          cfg,
-		WorkspacePath:   filepath.Join(rigDir, "crew"),      // Gas Town uses crew/ for workspaces
-		ArtifactsPath:   filepath.Join(rigDir, "artifacts"),
+		WorkspacePath:   filepath.Join(projectDir, "workspace"),
+		ArtifactsPath:   filepath.Join(projectDir, "artifacts"),
 		ProvisionScript: provisionScript,
 	}
 
@@ -327,8 +328,25 @@ NVIM
     sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH" GOPATH="$HOME/go"; go install github.com/opencode-ai/opencode@latest' 2>/dev/null || true
 
     # Gas Town (gt and bd CLIs)
-    sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH" GOPATH="$HOME/go"; go install github.com/steveyegge/gastown/cmd/gt@latest' 2>/dev/null || true
-    sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH" GOPATH="$HOME/go"; go install github.com/steveyegge/beads/cmd/bd@latest' 2>/dev/null || true
+    sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; go install github.com/steveyegge/gastown/cmd/gt@latest' 2>/dev/null || true
+    sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; go install github.com/steveyegge/beads/cmd/bd@latest' 2>/dev/null || true
+fi
+
+# --- Gas Town installation (runs for both pre-built and stock) ---
+# Install gt and bd if not present (handles pre-built images that may be out of date)
+if ! sudo -u agent bash -c 'command -v gt' &>/dev/null || ! sudo -u agent bash -c 'command -v bd' &>/dev/null; then
+    echo "Installing Gas Town dependencies..."
+    # bd requires libicu-dev for go-icu-regex
+    apt-get update -qq && apt-get install -y -qq libicu-dev pkg-config
+
+    if ! sudo -u agent bash -c 'command -v gt' &>/dev/null; then
+        echo "Installing Gas Town (gt)..."
+        sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; go install github.com/steveyegge/gastown/cmd/gt@latest' || echo "Warning: gt installation failed"
+    fi
+    if ! sudo -u agent bash -c 'command -v bd' &>/dev/null; then
+        echo "Installing beads (bd)..."
+        sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; CGO_ENABLED=1 go install github.com/steveyegge/beads/cmd/bd@latest' || echo "Warning: bd installation failed"
+    fi
 fi
 
 # --- Prompt config (runs for both pre-built and stock) ---
@@ -422,4 +440,136 @@ else
 fi
 echo "=========================================="
 `, cfg.Network.ProxyPort)
+}
+
+// generateProvisionScriptGasTown creates a provision script for Gas Town rigs
+// Sets up the environment and creates a setup script for first login
+func generateProvisionScriptGasTown(cfg *config.Config, rigName string, repoURL string) string {
+	// Get the base provision script
+	baseScript := generateProvisionScript(cfg)
+
+	// Add Gas Town environment setup
+	// The actual rig creation happens via a setup script on first login
+	gasTownSetup := fmt.Sprintf(`
+# --- Gas Town Environment Setup ---
+echo "Setting up Gas Town environment..."
+RIG_NAME="%s"
+REPO_URL="%s"
+
+# Set up directories
+sudo -u agent mkdir -p /home/agent/gt
+sudo -u agent mkdir -p /home/agent/.local/bin
+
+# Set GT_ROOT in agent's environment
+if ! grep -q "GT_ROOT" /home/agent/.zshrc 2>/dev/null; then
+    echo 'export GT_ROOT=/home/agent/gt' >> /home/agent/.zshrc
+fi
+
+# Create setup script that runs gt rig add
+# Note: Using quoted heredoc to prevent variable expansion, then substituting
+cat > /home/agent/.local/bin/setup-rig << 'SETUP_SCRIPT'
+#!/bin/bash
+set -e
+
+RIG_NAME="__RIG_NAME__"
+REPO_URL="__REPO_URL__"
+GT_ROOT="${GT_ROOT:-/home/agent/gt}"
+
+echo "Setting up Gas Town rig: $RIG_NAME"
+echo "Repository: $REPO_URL"
+echo ""
+
+# Check if rig already exists
+if [ -d "$GT_ROOT/$RIG_NAME/mayor" ]; then
+    echo "Rig already exists at $GT_ROOT/$RIG_NAME"
+    exit 0
+fi
+
+# Generate SSH key if needed
+if [ ! -f ~/.ssh/id_ed25519 ]; then
+    echo "No SSH key found. Generating one..."
+    mkdir -p ~/.ssh
+    ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -q
+    echo ""
+    echo "=== SSH PUBLIC KEY ==="
+    echo "Add this key to your GitHub account:"
+    echo ""
+    cat ~/.ssh/id_ed25519.pub
+    echo ""
+    echo "Then run this script again: setup-rig"
+    echo "======================="
+    exit 0
+fi
+
+# Add GitHub to known hosts
+mkdir -p ~/.ssh
+ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+
+# Try to clone to verify SSH access
+echo "Testing GitHub access..."
+if ! ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+    echo ""
+    echo "=== SSH KEY NOT CONFIGURED ==="
+    echo "Your SSH key is not added to GitHub."
+    echo "Add this key to your GitHub account:"
+    echo ""
+    cat ~/.ssh/id_ed25519.pub
+    echo ""
+    echo "Then run: setup-rig"
+    echo "=============================="
+    exit 1
+fi
+
+# Create the rig
+cd "$GT_ROOT"
+echo "Creating rig..."
+gt rig add "$RIG_NAME" "$REPO_URL"
+
+echo ""
+echo "=== Rig created successfully! ==="
+echo "Run: gt mayor attach"
+echo "================================="
+SETUP_SCRIPT
+# Substitute placeholders with actual values
+sed -i "s|__RIG_NAME__|$RIG_NAME|g" /home/agent/.local/bin/setup-rig
+sed -i "s|__REPO_URL__|$REPO_URL|g" /home/agent/.local/bin/setup-rig
+chmod +x /home/agent/.local/bin/setup-rig
+chown agent:agent /home/agent/.local/bin/setup-rig
+
+# Create a simpler version that auto-runs on first login
+cat > /home/agent/.setup-rig-info << EOF
+RIG_NAME=$RIG_NAME
+REPO_URL=$REPO_URL
+EOF
+chown agent:agent /home/agent/.setup-rig-info
+
+# Add first-login hint to .zshrc
+cat >> /home/agent/.zshrc << 'FIRSTLOGIN'
+
+# Gas Town first-login setup
+if [ -f ~/.setup-rig-info ] && [ ! -d "$GT_ROOT/*/mayor" ]; then
+    source ~/.setup-rig-info
+    echo ""
+    echo "╔════════════════════════════════════════════════════╗"
+    echo "║  Gas Town rig not yet configured                   ║"
+    echo "║  Run: setup-rig                                    ║"
+    echo "╚════════════════════════════════════════════════════╝"
+    echo ""
+fi
+FIRSTLOGIN
+
+# Add useful aliases
+if ! grep -q "alias crew=" /home/agent/.zshrc 2>/dev/null; then
+    echo 'alias crew="cd \$GT_ROOT/*/crew 2>/dev/null || cd \$GT_ROOT"' >> /home/agent/.zshrc
+fi
+
+# Set default working directory to gt root
+echo 'cd /home/agent/gt 2>/dev/null || true' >> /home/agent/.zshrc
+
+echo "Gas Town environment setup complete"
+echo "User should run 'setup-rig' on first login"
+`, rigName, repoURL)
+
+	// Insert the Gas Town setup before the "Mark Ready" section
+	return strings.Replace(baseScript, "# --- Mark Ready ---", gasTownSetup+"\n# --- Mark Ready ---", 1)
 }
