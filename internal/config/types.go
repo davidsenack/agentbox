@@ -33,6 +33,7 @@ type AuthConfig struct {
 // SecretsConfig defines secret handling settings
 type SecretsConfig struct {
 	RedactPatterns []string `yaml:"redact_patterns"`
+	AllowedEnvVars []string `yaml:"allowed_env_vars"` // Env vars to pass to VM (e.g., ANTHROPIC_API_KEY)
 }
 
 // MountConfig defines a host-to-guest mount
@@ -65,6 +66,9 @@ func DefaultConfig() *Config {
 			RedactPatterns: []string{
 				`sk-ant-[a-zA-Z0-9-]+`,
 				`sk-[a-zA-Z0-9]{48}`,
+			},
+			AllowedEnvVars: []string{
+				"ANTHROPIC_API_KEY", // Required for claude-code
 			},
 		},
 		Mounts: []MountConfig{

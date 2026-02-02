@@ -1,23 +1,35 @@
 package lima
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 )
 
 // Shell opens an interactive shell in the Lima VM as the 'agent' user
-// No secrets are passed - API keys are injected by the host proxy
-func (m *Manager) Shell(name string) error {
-	// Use sudo -i -u agent to get a login shell as the agent user
-	// Agent uses zsh with oh-my-zsh, starts in /workspace
-	cmd := exec.Command("limactl", "shell", name, "--", "sudo", "-i", "-u", "agent")
+// allowedEnvVars specifies which env vars to pass through (e.g., ANTHROPIC_API_KEY)
+func (m *Manager) Shell(name string, allowedEnvVars []string) error {
+	// Build env var exports for the agent user's shell
+	var envExports []string
+	for _, varName := range allowedEnvVars {
+		if val := os.Getenv(varName); val != "" {
+			envExports = append(envExports, fmt.Sprintf("%s=%s", varName, val))
+		}
+	}
+
+	// Use sudo with env preservation for allowed vars
+	// The command: sudo VAR1=val1 VAR2=val2 -i -u agent
+	args := []string{"shell", name, "--", "sudo"}
+	args = append(args, envExports...)
+	args = append(args, "-i", "-u", "agent")
+
+	cmd := exec.Command("limactl", args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// Block dangerous environment variables from leaking
-	// Even though we don't inject secrets, block them from Lima's default propagation
+	// Block dangerous environment variables from leaking via Lima's propagation
 	blockedPatterns := getBlockedEnvPatterns()
 	cmd.Env = filterEnv(os.Environ(), blockedPatterns)
 

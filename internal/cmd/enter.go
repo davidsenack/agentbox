@@ -111,13 +111,14 @@ func runEnter(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Entering AgentBox: %s\n", name)
-	fmt.Printf("Proxy on port %d, auth injection for: %v\n", cfg.Network.ProxyPort, authHosts)
-	fmt.Println("Network is open. API keys are injected by proxy (never in VM).")
+	if len(cfg.Secrets.AllowedEnvVars) > 0 {
+		fmt.Printf("Passing env vars: %v\n", cfg.Secrets.AllowedEnvVars)
+	}
 	fmt.Println("Type 'exit' to leave the sandbox")
 	fmt.Println()
 
-	// Enter shell - no secrets passed, they stay on host
-	if err := mgr.Shell(vmName); err != nil {
+	// Enter shell with allowed env vars
+	if err := mgr.Shell(vmName, cfg.Secrets.AllowedEnvVars); err != nil {
 		return fmt.Errorf("shell error: %w", err)
 	}
 

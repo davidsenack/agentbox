@@ -121,6 +121,9 @@ network:
       env: ANTHROPIC_API_KEY
 
 secrets:
+  # Env vars to pass to the VM (for tools that need API keys)
+  allowed_env_vars:
+    - ANTHROPIC_API_KEY
   # Patterns to redact from logs
   redact_patterns:
     - "sk-ant-[a-zA-Z0-9-]+"
@@ -294,17 +297,18 @@ To use a pre-built image, either:
 1. Upload it to a GitHub release (the template will auto-detect)
 2. Modify `internal/lima/template.go` to point to your image location
 
-## Limitations
+## Environment Variables
 
-- **HTTPS auth injection**: Currently, auth injection only works for HTTP requests. HTTPS requests to api.anthropic.com go through as tunnels (the API key is NOT exposed, but auth isn't injected either). For Claude Code to work, it needs ANTHROPIC_API_KEY set - see workarounds below.
+By default, AgentBox passes `ANTHROPIC_API_KEY` to the VM so claude-code works out of the box. You can configure which env vars are passed in `agentbox.yaml`:
 
-### Workaround for Claude Code
+```yaml
+secrets:
+  allowed_env_vars:
+    - ANTHROPIC_API_KEY
+    - OPENAI_API_KEY  # Add more as needed
+```
 
-Until HTTPS MITM is implemented, you can:
-
-1. **Accept the risk**: Pass ANTHROPIC_API_KEY to the VM (less secure, but functional)
-2. **Use HTTP**: Configure Claude Code to use HTTP (not recommended for production)
-3. **Wait for CA support**: Future versions will support HTTPS interception with custom CA
+**Security note:** Allowed env vars ARE visible inside the VM. Only add vars that the agent needs to function. Other secrets (AWS, SSH, etc.) remain blocked by default.
 
 ## License
 
