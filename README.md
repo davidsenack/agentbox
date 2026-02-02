@@ -7,12 +7,16 @@ AgentBox creates isolated Linux VMs where you can run arbitrary commands (includ
 ## Quick Start
 
 ```bash
-# Install (requires Lima)
-brew install lima
+# Install (requires Lima, optionally gh for GitHub integration)
+brew install lima gh
 go install github.com/davidsenack/agentbox/cmd/agentbox@latest
 
 # Create and enter a sandbox
 agentbox create myproject
+agentbox enter myproject
+
+# Or create with a GitHub repo for the project
+agentbox create myproject --github
 agentbox enter myproject
 
 # Inside the sandbox - full network access
@@ -89,6 +93,8 @@ The ANTHROPIC_API_KEY never enters the VM. Instead:
 | Command | Description |
 |---------|-------------|
 | `agentbox create <name>` | Create a new sandbox project |
+| `agentbox create <name> --github` | Create project with a private GitHub repo |
+| `agentbox create <name> --github --public` | Create project with a public GitHub repo |
 | `agentbox enter <name>` | Enter the sandbox (starts VM + proxy) |
 | `agentbox stop <name>` | Stop the VM without destroying it |
 | `agentbox reset <name>` | Destroy VM and recreate (preserves workspace) |
@@ -194,6 +200,7 @@ AgentBox protects your **ambient credentials** - the keys and tokens that exist 
 
 - macOS (Apple Silicon recommended)
 - [Lima](https://lima-vm.io/) (`brew install lima`)
+- [GitHub CLI](https://cli.github.com/) (`brew install gh`) - optional, for `--github` flag
 - Go 1.21+ (for building from source)
 
 ## Building from Source
