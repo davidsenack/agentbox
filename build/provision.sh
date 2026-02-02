@@ -85,15 +85,15 @@ sudo -u agent sh -c 'RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubuse
 cat > /home/agent/.zshrc << 'ZSHRC'
 # AgentBox zsh configuration
 export ZSH="$HOME/.oh-my-zsh"
-ZSH_THEME="robbyrussell"
-plugins=(git fzf)
+ZSH_THEME=""  # Disabled - using Starship
+plugins=(git fzf zsh-autosuggestions zsh-syntax-highlighting)
 source $ZSH/oh-my-zsh.sh
 
 # Environment
 export PATH="$HOME/.local/bin:/usr/local/go/bin:$HOME/go/bin:$PATH"
 export GOPATH="$HOME/go"
 
-# Proxy (for API key injection) - set at runtime by agentbox enter
+# Proxy config
 if [ -f /etc/agentbox/proxy.conf ]; then
     export $(grep -v '^#' /etc/agentbox/proxy.conf | xargs)
 fi
@@ -109,6 +109,49 @@ fi
 # Start in workspace
 cd /workspace 2>/dev/null || true
 ZSHRC
+
+# --- Starship config for AgentBox ---
+sudo -u agent mkdir -p /home/agent/.config
+cat > /home/agent/.config/starship.toml << 'STARSHIP'
+# AgentBox Starship Prompt
+format = """
+[agent](bold green)[@](white)[agentbox](bold cyan)[/](white)$directory$git_branch$git_status
+[❯](bold green) """
+
+[directory]
+truncation_length = 2
+truncate_to_repo = false
+style = "bold yellow"
+format = "[$path]($style) "
+
+[git_branch]
+symbol = ""
+style = "bold purple"
+format = "[$symbol$branch]($style) "
+
+[git_status]
+style = "bold red"
+format = "[$all_status$ahead_behind]($style)"
+conflicted = "="
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕⇡${ahead_count}⇣${behind_count}"
+untracked = "?"
+stashed = "$"
+modified = "!"
+staged = "+"
+renamed = "»"
+deleted = "✘"
+
+[character]
+disabled = true
+STARSHIP
+chown -R agent:agent /home/agent/.config
+
+# --- Install zsh plugins ---
+git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-/home/agent/.oh-my-zsh/custom}/plugins/zsh-autosuggestions 2>/dev/null || true
+git clone https://github.com/zsh-users/zsh-syntax-highlighting ${ZSH_CUSTOM:-/home/agent/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting 2>/dev/null || true
+chown -R agent:agent /home/agent/.oh-my-zsh
 
 chown agent:agent /home/agent/.zshrc
 

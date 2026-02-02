@@ -227,18 +227,50 @@ if [ "$PREBUILT" = false ]; then
     # .zshrc
     cat > /home/agent/.zshrc << 'ZSHRC'
 export ZSH="$HOME/.oh-my-zsh"
-ZSH_THEME="robbyrussell"
-plugins=(git fzf)
+ZSH_THEME=""
+plugins=(git fzf zsh-autosuggestions zsh-syntax-highlighting)
 source $ZSH/oh-my-zsh.sh
 export PATH="$HOME/.local/bin:/usr/local/go/bin:$HOME/go/bin:$PATH"
 export GOPATH="$HOME/go"
-# Load proxy config for API key injection
 if [ -f /etc/agentbox/proxy.conf ]; then export $(grep -v '^#' /etc/agentbox/proxy.conf | xargs); fi
 eval "$(starship init zsh)"
 command -v mise &>/dev/null && eval "$(mise activate zsh)"
 cd /workspace 2>/dev/null || true
 ZSHRC
     chown agent:agent /home/agent/.zshrc
+
+    # Starship config
+    cat > /home/agent/.config/starship.toml << 'STARSHIP'
+format = """[agent](bold green)[@](white)[agentbox](bold cyan)[/](white)$directory$git_branch$git_status
+[❯](bold green) """
+[directory]
+truncation_length = 2
+truncate_to_repo = false
+style = "bold yellow"
+format = "[$path]($style) "
+[git_branch]
+symbol = ""
+style = "bold purple"
+format = "[$symbol$branch]($style) "
+[git_status]
+style = "bold red"
+format = "[$all_status$ahead_behind]($style)"
+conflicted = "="
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕"
+untracked = "?"
+modified = "!"
+staged = "+"
+deleted = "✘"
+[character]
+disabled = true
+STARSHIP
+
+    # zsh plugins
+    git clone https://github.com/zsh-users/zsh-autosuggestions /home/agent/.oh-my-zsh/custom/plugins/zsh-autosuggestions 2>/dev/null || true
+    git clone https://github.com/zsh-users/zsh-syntax-highlighting /home/agent/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting 2>/dev/null || true
+    chown -R agent:agent /home/agent/.oh-my-zsh
 
     # Neovim config
     cat > /home/agent/.config/nvim/init.lua << 'NVIM'
@@ -258,6 +290,61 @@ NVIM
     npm install -g @anthropic-ai/claude-code 2>/dev/null || true
     sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH" GOPATH="$HOME/go"; go install github.com/opencode-ai/opencode@latest' 2>/dev/null || true
 fi
+
+# --- Prompt config (runs for both pre-built and stock) ---
+# Always update Starship config to latest
+mkdir -p /home/agent/.config
+cat > /home/agent/.config/starship.toml << 'STARSHIP'
+format = """[agent](bold green)[@](white)[agentbox](bold cyan)[/](white)$directory$git_branch$git_status
+[❯](bold green) """
+[directory]
+truncation_length = 2
+truncate_to_repo = false
+style = "bold yellow"
+format = "[$path]($style) "
+[git_branch]
+symbol = ""
+style = "bold purple"
+format = "[$symbol$branch]($style) "
+[git_status]
+style = "bold red"
+format = "[$all_status$ahead_behind]($style)"
+conflicted = "="
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕"
+untracked = "?"
+modified = "!"
+staged = "+"
+deleted = "✘"
+[character]
+disabled = true
+STARSHIP
+chown -R agent:agent /home/agent/.config
+
+# Install zsh plugins if missing
+if [ ! -d /home/agent/.oh-my-zsh/custom/plugins/zsh-autosuggestions ]; then
+    git clone https://github.com/zsh-users/zsh-autosuggestions /home/agent/.oh-my-zsh/custom/plugins/zsh-autosuggestions 2>/dev/null || true
+fi
+if [ ! -d /home/agent/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting ]; then
+    git clone https://github.com/zsh-users/zsh-syntax-highlighting /home/agent/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting 2>/dev/null || true
+fi
+chown -R agent:agent /home/agent/.oh-my-zsh 2>/dev/null || true
+
+# Update .zshrc to use new plugins
+cat > /home/agent/.zshrc << 'ZSHRC'
+export ZSH="$HOME/.oh-my-zsh"
+ZSH_THEME=""
+plugins=(git fzf zsh-autosuggestions zsh-syntax-highlighting)
+source $ZSH/oh-my-zsh.sh
+export PATH="$HOME/.local/bin:/usr/local/go/bin:$HOME/go/bin:$PATH"
+export GOPATH="$HOME/go"
+if [ -f /etc/agentbox/proxy.conf ]; then export $(grep -v '^#' /etc/agentbox/proxy.conf | xargs); fi
+eval "$(starship init zsh)"
+command -v mise &>/dev/null && eval "$(mise activate zsh)"
+cd /workspace 2>/dev/null || true
+ZSHRC
+chown agent:agent /home/agent/.zshrc
 
 # --- Secure secrets setup (runs for both pre-built and stock) ---
 # Create secure claude wrapper if not already present

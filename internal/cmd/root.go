@@ -55,6 +55,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 
 	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(deleteCmd)
 	rootCmd.AddCommand(enterCmd)
 	rootCmd.AddCommand(resetCmd)
 	rootCmd.AddCommand(stopCmd)
