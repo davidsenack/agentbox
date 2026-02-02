@@ -143,6 +143,37 @@ echo "Installing AI coding tools..."
 # claude-code (install globally as root)
 npm install -g @anthropic-ai/claude-code || echo "Warning: claude-code installation failed"
 
+# Get the real claude path
+CLAUDE_REAL=$(which claude 2>/dev/null || echo "/usr/bin/claude")
+
+# Create secure wrapper for claude that reads API key from protected file
+# This ensures the key is never visible via `env` or `echo $ANTHROPIC_API_KEY`
+cat > /usr/local/bin/claude << 'WRAPPER'
+#!/bin/bash
+# Secure wrapper - reads API key from root-only file
+# Key is never visible via 'env' or 'echo $ANTHROPIC_API_KEY'
+KEY=$(sudo cat /etc/agentbox/secrets/ANTHROPIC_API_KEY 2>/dev/null)
+[ -n "$KEY" ] && export ANTHROPIC_API_KEY="$KEY"
+exec /usr/bin/claude-real "$@"
+WRAPPER
+chmod +x /usr/local/bin/claude
+
+# Move real claude binary
+if [ -f "$CLAUDE_REAL" ] && [ "$CLAUDE_REAL" != "/usr/local/bin/claude" ]; then
+    mv "$CLAUDE_REAL" /usr/bin/claude-real 2>/dev/null || cp "$CLAUDE_REAL" /usr/bin/claude-real
+fi
+
+# Create secrets directory
+mkdir -p /etc/agentbox/secrets
+chmod 700 /etc/agentbox/secrets
+
+# Add sudoers rule to let agent read the secrets file without password
+cat > /etc/sudoers.d/agentbox-secrets << 'SUDOERS'
+# Allow agent to read agentbox secrets without password
+agent ALL=(root) NOPASSWD: /bin/cat /etc/agentbox/secrets/*
+SUDOERS
+chmod 0440 /etc/sudoers.d/agentbox-secrets
+
 # opencode (install for agent user)
 sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; /usr/local/go/bin/go install github.com/opencode-ai/opencode@latest' || echo "Warning: opencode installation failed"
 

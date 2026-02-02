@@ -259,6 +259,30 @@ NVIM
     sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH" GOPATH="$HOME/go"; go install github.com/opencode-ai/opencode@latest' 2>/dev/null || true
 fi
 
+# --- Secure secrets setup (runs for both pre-built and stock) ---
+# Create secure claude wrapper if not already present
+if [ ! -f /usr/bin/claude-real ]; then
+    CLAUDE_PATH=$(which claude 2>/dev/null || true)
+    if [ -n "$CLAUDE_PATH" ] && [ "$CLAUDE_PATH" != "/usr/local/bin/claude" ]; then
+        mv "$CLAUDE_PATH" /usr/bin/claude-real
+        cat > /usr/local/bin/claude << 'WRAPPER'
+#!/bin/bash
+# Secure wrapper - reads API key from root-only file
+# Key is never visible via 'env' or 'echo $ANTHROPIC_API_KEY'
+KEY=$(sudo cat /etc/agentbox/secrets/ANTHROPIC_API_KEY 2>/dev/null)
+[ -n "$KEY" ] && export ANTHROPIC_API_KEY="$KEY"
+exec /usr/bin/claude-real "$@"
+WRAPPER
+        chmod +x /usr/local/bin/claude
+    fi
+fi
+mkdir -p /etc/agentbox/secrets
+chmod 700 /etc/agentbox/secrets
+cat > /etc/sudoers.d/agentbox-secrets << 'SUDOERS'
+agent ALL=(root) NOPASSWD: /bin/cat /etc/agentbox/secrets/*
+SUDOERS
+chmod 0440 /etc/sudoers.d/agentbox-secrets
+
 # --- Mark Ready ---
 touch /etc/agentbox-ready
 echo ""

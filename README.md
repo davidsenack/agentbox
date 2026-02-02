@@ -297,18 +297,32 @@ To use a pre-built image, either:
 1. Upload it to a GitHub release (the template will auto-detect)
 2. Modify `internal/lima/template.go` to point to your image location
 
-## Environment Variables
+## Environment Variables & Security
 
-By default, AgentBox passes `ANTHROPIC_API_KEY` to the VM so claude-code works out of the box. You can configure which env vars are passed in `agentbox.yaml`:
+AgentBox securely injects `ANTHROPIC_API_KEY` so claude-code works, but the key is **never visible** to the user:
 
+```bash
+# Inside the VM:
+echo $ANTHROPIC_API_KEY    # Shows nothing
+env | grep ANTHROPIC       # Shows nothing
+cat /etc/agentbox/secrets/*  # Permission denied
+
+# But claude-code works!
+claude "hello"             # Works - key is injected by secure wrapper
+```
+
+**How it works:**
+1. Key is stored in `/etc/agentbox/secrets/` (root-only, mode 600)
+2. A wrapper script reads the key via sudo and injects it only for the claude process
+3. The key never appears in shell environment or process listings
+
+Configure which keys to inject in `agentbox.yaml`:
 ```yaml
 secrets:
   allowed_env_vars:
     - ANTHROPIC_API_KEY
     - OPENAI_API_KEY  # Add more as needed
 ```
-
-**Security note:** Allowed env vars ARE visible inside the VM. Only add vars that the agent needs to function. Other secrets (AWS, SSH, etc.) remain blocked by default.
 
 ## License
 

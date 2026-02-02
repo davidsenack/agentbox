@@ -112,7 +112,7 @@ func runEnter(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Entering AgentBox: %s\n", name)
 	if len(cfg.Secrets.AllowedEnvVars) > 0 {
-		fmt.Printf("Passing env vars: %v\n", cfg.Secrets.AllowedEnvVars)
+		fmt.Printf("API keys injected securely (hidden from env)\n")
 	}
 	fmt.Println("Type 'exit' to leave the sandbox")
 	fmt.Println()

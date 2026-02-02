@@ -8,21 +8,16 @@ import (
 )
 
 // Shell opens an interactive shell in the Lima VM as the 'agent' user
-// allowedEnvVars specifies which env vars to pass through (e.g., ANTHROPIC_API_KEY)
+// allowedEnvVars specifies which env vars to inject securely (stored in root-only files)
 func (m *Manager) Shell(name string, allowedEnvVars []string) error {
-	// Build env var exports for the agent user's shell
-	var envExports []string
-	for _, varName := range allowedEnvVars {
-		if val := os.Getenv(varName); val != "" {
-			envExports = append(envExports, fmt.Sprintf("%s=%s", varName, val))
-		}
+	// Inject secrets securely - write to root-only files, not env vars
+	// This way `echo $ANTHROPIC_API_KEY` shows nothing
+	if err := injectSecrets(name, allowedEnvVars); err != nil {
+		return fmt.Errorf("failed to inject secrets: %w", err)
 	}
 
-	// Use sudo with env preservation for allowed vars
-	// The command: sudo VAR1=val1 VAR2=val2 -i -u agent
-	args := []string{"shell", name, "--", "sudo"}
-	args = append(args, envExports...)
-	args = append(args, "-i", "-u", "agent")
+	// Start the shell without any secrets in environment
+	args := []string{"shell", name, "--", "sudo", "-i", "-u", "agent"}
 
 	cmd := exec.Command("limactl", args...)
 	cmd.Stdin = os.Stdin
@@ -34,6 +29,32 @@ func (m *Manager) Shell(name string, allowedEnvVars []string) error {
 	cmd.Env = filterEnv(os.Environ(), blockedPatterns)
 
 	return cmd.Run()
+}
+
+// injectSecrets writes allowed env vars to secure root-only files in the VM
+// The claude wrapper script reads from these files
+func injectSecrets(vmName string, allowedEnvVars []string) error {
+	for _, varName := range allowedEnvVars {
+		val := os.Getenv(varName)
+		if val == "" {
+			continue
+		}
+
+		// Write to /etc/agentbox/secrets/<varname> with mode 600, owned by root
+		// The wrapper scripts read from here using sudo
+		script := fmt.Sprintf(`
+mkdir -p /etc/agentbox/secrets
+echo -n %q > /etc/agentbox/secrets/%s
+chmod 600 /etc/agentbox/secrets/%s
+chown root:root /etc/agentbox/secrets/%s
+`, val, varName, varName, varName)
+
+		cmd := exec.Command("limactl", "shell", vmName, "--", "sudo", "sh", "-c", script)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to inject %s: %w", varName, err)
+		}
+	}
+	return nil
 }
 
 // getBlockedEnvPatterns returns patterns of env vars to block from propagation
