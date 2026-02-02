@@ -98,6 +98,8 @@ The ANTHROPIC_API_KEY never enters the VM. Instead:
 | `agentbox enter <name>` | Enter the sandbox (starts VM + proxy) |
 | `agentbox stop <name>` | Stop the VM without destroying it |
 | `agentbox reset <name>` | Destroy VM and recreate (preserves workspace) |
+| `agentbox delete <name>` | Delete project completely (VM + all files) |
+| `agentbox delete <name> -f` | Force delete without confirmation |
 | `agentbox list` | List projects in current directory |
 
 ## Configuration
@@ -172,7 +174,10 @@ AgentBox VMs come ready to work with these tools pre-installed.
 
 **Shell & Terminal:**
 - zsh with Oh My Zsh
-- Starship prompt
+- Custom Starship prompt: `agent@agentbox/path branch +!?`
+  - Shows git branch and status (staged, modified, untracked)
+- zsh-autosuggestions (suggests commands as you type)
+- zsh-syntax-highlighting (colors valid/invalid commands)
 - tmux
 - fzf (fuzzy finder)
 

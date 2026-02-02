@@ -28,9 +28,15 @@ var rootCmd = &cobra.Command{
 The sandbox provides:
   - Full filesystem isolation (only workspace/artifacts mounted)
   - Host secret protection (SSH keys, AWS creds, API keys never in VM)
-  - API key injection via proxy (keys stay on host)
-  - Open network (agent can reach any host)
-  - Easy reset to clean state`,
+  - Secure API key injection (keys hidden from VM environment)
+  - Open network access for development
+  - Easy reset to clean state
+
+Quick Start:
+  agentbox create myproject    # Create a new sandbox
+  agentbox enter myproject     # Enter the sandbox
+  agentbox reset myproject     # Reset to clean state (keeps files)
+  agentbox delete myproject    # Delete everything`,
 }
 
 var versionCmd = &cobra.Command{
