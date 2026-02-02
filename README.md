@@ -297,9 +297,33 @@ To use a pre-built image, either:
 1. Upload it to a GitHub release (the template will auto-detect)
 2. Modify `internal/lima/template.go` to point to your image location
 
-## Environment Variables & Security
+## Claude Code Authentication
 
-AgentBox securely injects `ANTHROPIC_API_KEY` so claude-code works, but the key is **never visible** to the user:
+AgentBox supports two authentication methods for Claude Code:
+
+### Option 1: Max Subscription (OAuth Login)
+
+If you have a Claude Max subscription, log in once inside the sandbox:
+
+```bash
+agentbox enter myproject
+# Inside the sandbox:
+claude                     # First run opens browser for OAuth login
+# After login, claude works until you reset the VM
+```
+
+The OAuth token stays inside the VM - your host credentials are never exposed.
+
+### Option 2: API Key (Secure Injection)
+
+If you have an Anthropic API key, set it on your host:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."   # On your host (add to ~/.zshrc)
+agentbox enter myproject
+```
+
+The key is securely injected but **never visible** inside the VM:
 
 ```bash
 # Inside the VM:
