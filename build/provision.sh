@@ -62,6 +62,7 @@ curl -fsSL https://starship.rs/install.sh | sh -s -- -y
 
 # --- mise (version manager) ---
 echo "Installing mise..."
+export HOME=/root
 curl -fsSL https://mise.run | sh
 mv /root/.local/bin/mise /usr/local/bin/mise 2>/dev/null || true
 
@@ -92,14 +93,9 @@ source $ZSH/oh-my-zsh.sh
 export PATH="$HOME/.local/bin:/usr/local/go/bin:$HOME/go/bin:$PATH"
 export GOPATH="$HOME/go"
 
-# Proxy (for API key injection) - set at runtime by Lima
-if [ -n "$AGENTBOX_PROXY" ]; then
-    export HTTP_PROXY="$AGENTBOX_PROXY"
-    export HTTPS_PROXY="$AGENTBOX_PROXY"
-    export http_proxy="$AGENTBOX_PROXY"
-    export https_proxy="$AGENTBOX_PROXY"
-    export NO_PROXY="localhost,127.0.0.1,::1"
-    export no_proxy="localhost,127.0.0.1,::1"
+# Proxy (for API key injection) - set at runtime by agentbox enter
+if [ -f /etc/agentbox/proxy.conf ]; then
+    export $(grep -v '^#' /etc/agentbox/proxy.conf | xargs)
 fi
 
 # Starship prompt

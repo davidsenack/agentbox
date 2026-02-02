@@ -169,20 +169,21 @@ PROXY_URL="http://${HOST_GATEWAY}:${PROXY_PORT}"
 
 echo "Configuring proxy: ${PROXY_URL}"
 
-# Set proxy in environment
-cat >> /etc/environment << EOF
+# Save proxy config for runtime use (NOT during provisioning)
+# Proxy is only needed when user enters the box, not during setup
+mkdir -p /etc/agentbox
+cat > /etc/agentbox/proxy.conf << EOF
+AGENTBOX_PROXY="${PROXY_URL}"
 HTTP_PROXY="${PROXY_URL}"
 HTTPS_PROXY="${PROXY_URL}"
 http_proxy="${PROXY_URL}"
 https_proxy="${PROXY_URL}"
 NO_PROXY="localhost,127.0.0.1,::1"
 no_proxy="localhost,127.0.0.1,::1"
-AGENTBOX_PROXY="${PROXY_URL}"
 EOF
 
-# Export for current script
-export HTTP_PROXY="${PROXY_URL}"
-export HTTPS_PROXY="${PROXY_URL}"
+# Clear any proxy vars during provisioning (direct internet access)
+unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
 
 # --- Full provisioning only if not pre-built ---
 if [ "$PREBUILT" = false ]; then
@@ -209,7 +210,8 @@ if [ "$PREBUILT" = false ]; then
     # Starship
     curl -fsSL https://starship.rs/install.sh | sh -s -- -y
 
-    # mise
+    # mise (needs HOME set)
+    export HOME=/root
     curl -fsSL https://mise.run | sh
     mv /root/.local/bin/mise /usr/local/bin/mise 2>/dev/null || true
 
@@ -230,7 +232,8 @@ plugins=(git fzf)
 source $ZSH/oh-my-zsh.sh
 export PATH="$HOME/.local/bin:/usr/local/go/bin:$HOME/go/bin:$PATH"
 export GOPATH="$HOME/go"
-if [ -f /etc/environment ]; then export $(grep -v '^#' /etc/environment | xargs); fi
+# Load proxy config for API key injection
+if [ -f /etc/agentbox/proxy.conf ]; then export $(grep -v '^#' /etc/agentbox/proxy.conf | xargs); fi
 eval "$(starship init zsh)"
 command -v mise &>/dev/null && eval "$(mise activate zsh)"
 cd /workspace 2>/dev/null || true
@@ -251,8 +254,8 @@ vim.g.mapleader = " "
 NVIM
     chown -R agent:agent /home/agent/.config
 
-    # AI tools
-    sudo -u agent npm install -g @anthropic-ai/claude-code 2>/dev/null || true
+    # AI tools (install globally)
+    npm install -g @anthropic-ai/claude-code 2>/dev/null || true
     sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH" GOPATH="$HOME/go"; go install github.com/opencode-ai/opencode@latest' 2>/dev/null || true
 fi
 
