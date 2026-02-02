@@ -134,13 +134,15 @@ set -euo pipefail
 # Network is OPEN - proxy is used for API key injection only
 # =============================================================================
 
+export DEBIAN_FRONTEND=noninteractive
+
 echo "Starting AgentBox provisioning..."
 
 # --- User Creation ---
 if ! id -u agent >/dev/null 2>&1; then
     echo "Creating agent user..."
-    useradd -m -s /bin/bash -G sudo agent
-    echo "agent ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt" > /etc/sudoers.d/agent
+    useradd -m -s /bin/zsh -G sudo agent
+    echo "agent ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/agent
     chmod 0440 /etc/sudoers.d/agent
 fi
 
@@ -157,7 +159,6 @@ PROXY_URL="http://${HOST_GATEWAY}:${PROXY_PORT}"
 echo "Configuring proxy: ${PROXY_URL}"
 
 # Set system-wide proxy in /etc/environment (read by PAM for all shells)
-# This ensures proxy vars are available even in non-interactive shells
 cat >> /etc/environment << EOF
 HTTP_PROXY="${PROXY_URL}"
 HTTPS_PROXY="${PROXY_URL}"
@@ -167,57 +168,151 @@ NO_PROXY="localhost,127.0.0.1,::1"
 no_proxy="localhost,127.0.0.1,::1"
 EOF
 
-# Also save to environment.d for sourcing in bashrc
-mkdir -p /etc/environment.d
-cat > /etc/environment.d/proxy.conf << EOF
-HTTP_PROXY=${PROXY_URL}
-HTTPS_PROXY=${PROXY_URL}
-http_proxy=${PROXY_URL}
-https_proxy=${PROXY_URL}
-NO_PROXY=localhost,127.0.0.1,::1
-no_proxy=localhost,127.0.0.1,::1
-EOF
+# Export for current script
+export HTTP_PROXY="${PROXY_URL}"
+export HTTPS_PROXY="${PROXY_URL}"
+export http_proxy="${PROXY_URL}"
+export https_proxy="${PROXY_URL}"
+
+# --- System Packages ---
+echo "Installing system packages..."
+apt-get update
+apt-get install -y \
+    zsh \
+    build-essential \
+    curl \
+    wget \
+    git \
+    jq \
+    ripgrep \
+    fzf \
+    tmux \
+    neovim \
+    unzip \
+    ca-certificates \
+    gnupg
+
+# --- Node.js (via NodeSource for latest LTS) ---
+echo "Installing Node.js..."
+mkdir -p /etc/apt/keyrings
+curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+apt-get update
+apt-get install -y nodejs
+
+# --- Python 3 ---
+echo "Installing Python..."
+apt-get install -y python3 python3-pip python3-venv
+
+# --- Go ---
+echo "Installing Go..."
+GO_VERSION="1.22.0"
+ARCH=$(dpkg --print-architecture)
+curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" | tar -C /usr/local -xzf -
+echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh
+
+# --- Starship Prompt ---
+echo "Installing Starship..."
+curl -fsSL https://starship.rs/install.sh | sh -s -- -y
+
+# --- mise (version manager) ---
+echo "Installing mise..."
+curl -fsSL https://mise.run | sh
+mv /root/.local/bin/mise /usr/local/bin/mise 2>/dev/null || true
+
+# --- Agent User Setup ---
+echo "Configuring agent environment..."
+
+# Set zsh as default shell
+chsh -s /bin/zsh agent
+
+# Create agent directories
+sudo -u agent mkdir -p /home/agent/.local/bin
+sudo -u agent mkdir -p /home/agent/.config/nvim
+
+# --- Oh My Zsh ---
+echo "Installing Oh My Zsh..."
+sudo -u agent sh -c 'RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
+
+# --- Agent .zshrc ---
+cat > /home/agent/.zshrc << 'ZSHRC'
+# AgentBox zsh configuration
+export ZSH="$HOME/.oh-my-zsh"
+ZSH_THEME="robbyrussell"
+plugins=(git fzf)
+source $ZSH/oh-my-zsh.sh
+
+# Environment
+export PATH="$HOME/.local/bin:/usr/local/go/bin:$PATH"
+export GOPATH="$HOME/go"
+export PATH="$GOPATH/bin:$PATH"
+
+# Proxy (for API key injection)
+if [ -f /etc/environment ]; then
+    export $(grep -v '^#' /etc/environment | xargs)
+fi
+
+# Starship prompt
+eval "$(starship init zsh)"
+
+# mise (version manager)
+if command -v mise &> /dev/null; then
+    eval "$(mise activate zsh)"
+fi
+
+# Start in workspace
+cd /workspace 2>/dev/null || true
+ZSHRC
+
+chown agent:agent /home/agent/.zshrc
+
+# --- Neovim Config ---
+cat > /home/agent/.config/nvim/init.lua << 'NVIMCONFIG'
+-- AgentBox Neovim configuration
+vim.opt.number = true
+vim.opt.relativenumber = true
+vim.opt.expandtab = true
+vim.opt.tabstop = 4
+vim.opt.shiftwidth = 4
+vim.opt.smartindent = true
+vim.opt.wrap = false
+vim.opt.cursorline = true
+vim.opt.termguicolors = true
+vim.opt.signcolumn = "yes"
+vim.opt.clipboard = "unnamedplus"
+vim.opt.ignorecase = true
+vim.opt.smartcase = true
+
+-- Key mappings
+vim.g.mapleader = " "
+vim.keymap.set("n", "<leader>w", ":w<CR>")
+vim.keymap.set("n", "<leader>q", ":q<CR>")
+NVIMCONFIG
+
+chown -R agent:agent /home/agent/.config
+
+# --- Install AI Tools as agent user ---
+echo "Installing AI coding tools..."
+
+# claude-code
+sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; npm install -g @anthropic-ai/claude-code' || echo "claude-code install failed (may need API key)"
+
+# opencode
+sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; /usr/local/go/bin/go install github.com/opencode-ai/opencode@latest' || echo "opencode install failed"
 
 # --- Mount Permissions ---
-# Note: virtiofs mounts may not support permission changes from guest
-# The mounts are configured with correct permissions from the host side
 echo "Mount points ready: /workspace, /artifacts"
-
-# --- Agent Profile ---
-echo "Configuring agent shell environment..."
-
-# Add proxy and workspace config to .profile (runs for login shells before .bashrc guard)
-cat >> /home/agent/.profile << 'PROFILE'
-
-# AgentBox proxy configuration
-export HTTP_PROXY="$HTTP_PROXY"
-export HTTPS_PROXY="$HTTPS_PROXY"
-export http_proxy="$http_proxy"
-export https_proxy="$https_proxy"
-export NO_PROXY="$NO_PROXY"
-export no_proxy="$no_proxy"
-
-# Start in workspace for login shells
-cd /workspace 2>/dev/null || true
-PROFILE
-
-# Add PS1 customization to .bashrc (only for interactive shells)
-mkdir -p /home/agent/.bashrc.d
-cat > /home/agent/.bashrc.d/agentbox.sh << 'BASHRC'
-# AgentBox environment - interactive shell customizations
-export PS1='[agentbox] \u@\h:\w\$ '
-BASHRC
-
-chown -R agent:agent /home/agent/.bashrc.d
-
-# Ensure .bashrc sources .bashrc.d
-if ! grep -q 'bashrc.d' /home/agent/.bashrc 2>/dev/null; then
-    echo 'for f in ~/.bashrc.d/*.sh; do [ -r "$f" ] && source "$f"; done' >> /home/agent/.bashrc
-fi
 
 # --- Mark Ready ---
 touch /etc/agentbox-ready
+echo ""
+echo "=========================================="
 echo "AgentBox provisioning complete!"
-echo "Network is OPEN - API keys are injected by host proxy"
+echo "=========================================="
+echo "Installed: zsh, oh-my-zsh, starship, tmux"
+echo "Installed: node, python, go, mise"
+echo "Installed: neovim, ripgrep, fzf, jq"
+echo "Installed: claude-code, opencode"
+echo "=========================================="
 `, cfg.Network.ProxyPort)
 }

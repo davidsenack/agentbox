@@ -161,6 +161,61 @@ cp ~/.ssh/repo_specific_key myproject/workspace/.ssh/
 # In VM, it's available at /workspace/.ssh/
 ```
 
+## Pre-installed Software
+
+AgentBox VMs come ready to work with these tools pre-installed:
+
+**Shell & Terminal:**
+- zsh with Oh My Zsh
+- Starship prompt
+- tmux
+- fzf (fuzzy finder)
+
+**Languages & Runtimes:**
+- Node.js 22 LTS + npm
+- Python 3 + pip + venv
+- Go 1.22
+- mise (version manager for additional runtimes)
+
+**Development Tools:**
+- git
+- neovim (with sensible defaults)
+- ripgrep (fast grep)
+- jq (JSON processor)
+- build-essential (gcc, make)
+
+**AI Coding Tools:**
+- claude-code (`claude` command)
+- opencode (`opencode` command)
+
+## Installing Additional Packages
+
+Inside the sandbox, you have full sudo access:
+
+```bash
+# System packages (apt)
+sudo apt-get update
+sudo apt-get install <package>
+
+# Node packages (global)
+npm install -g <package>
+
+# Python packages
+pip install <package>
+# Or use a venv:
+python3 -m venv .venv && source .venv/bin/activate
+
+# Go tools
+go install <package>@latest
+
+# Use mise for additional language versions
+mise use node@20
+mise use python@3.11
+mise use go@1.21
+```
+
+**Note:** Installed packages persist until you run `agentbox reset`. The reset command destroys the VM but preserves your `/workspace` files.
+
 ## Project Structure
 
 After `agentbox create myproject`:

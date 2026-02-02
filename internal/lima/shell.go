@@ -10,7 +10,7 @@ import (
 // No secrets are passed - API keys are injected by the host proxy
 func (m *Manager) Shell(name string) error {
 	// Use sudo -i -u agent to get a login shell as the agent user
-	// This starts in /workspace due to .bashrc.d/agentbox.sh
+	// Agent uses zsh with oh-my-zsh, starts in /workspace
 	cmd := exec.Command("limactl", "shell", name, "--", "sudo", "-i", "-u", "agent")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
