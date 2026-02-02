@@ -3,11 +3,18 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/davidsenack/agentbox/internal/config"
 	"github.com/davidsenack/agentbox/internal/lima"
 	"github.com/spf13/cobra"
+)
+
+var (
+	createGitHub bool
+	createPublic bool
 )
 
 var createCmd = &cobra.Command{
@@ -19,13 +26,19 @@ This command:
   1. Creates the project directory structure
   2. Generates default agentbox.yaml configuration
   3. Provisions a Lima VM (stopped)
+  4. Optionally creates a GitHub repo for the project
 
 Example:
   agentbox create myproject
-  cd myproject
-  agentbox enter myproject`,
+  agentbox create myproject --github           # Create with private GitHub repo
+  agentbox create myproject --github --public  # Create with public GitHub repo`,
 	Args: cobra.ExactArgs(1),
 	RunE: runCreate,
+}
+
+func init() {
+	createCmd.Flags().BoolVar(&createGitHub, "github", false, "Create a GitHub repository for the project")
+	createCmd.Flags().BoolVar(&createPublic, "public", false, "Make the GitHub repo public (default: private)")
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
@@ -66,12 +79,19 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save configuration: %w", err)
 	}
 
-	// Create .gitignore
+	// Create .gitignore for the box
 	gitignore := filepath.Join(name, ".gitignore")
 	gitignoreContent := `.agentbox/
 `
 	if err := os.WriteFile(gitignore, []byte(gitignoreContent), 0644); err != nil {
 		return fmt.Errorf("failed to create .gitignore: %w", err)
+	}
+
+	// Create GitHub repo if requested
+	if createGitHub {
+		if err := setupGitHubRepo(name); err != nil {
+			return fmt.Errorf("failed to setup GitHub repo: %w", err)
+		}
 	}
 
 	// Get absolute path for Lima template
@@ -108,6 +128,110 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Next steps:\n")
 	fmt.Printf("  cd %s\n", name)
 	fmt.Printf("  agentbox enter %s\n", name)
+
+	return nil
+}
+
+// setupGitHubRepo creates a GitHub repo and initializes git in the workspace
+func setupGitHubRepo(name string) error {
+	workspacePath := filepath.Join(name, "workspace")
+
+	// Check if gh CLI is available
+	if _, err := exec.LookPath("gh"); err != nil {
+		return fmt.Errorf("gh CLI not found. Install with: brew install gh")
+	}
+
+	// Check if user is authenticated
+	authCheck := exec.Command("gh", "auth", "status")
+	if err := authCheck.Run(); err != nil {
+		return fmt.Errorf("not authenticated with GitHub. Run: gh auth login")
+	}
+
+	fmt.Printf("Creating GitHub repository: %s\n", name)
+
+	// Create the GitHub repo
+	args := []string{"repo", "create", name, "--source", workspacePath}
+	if createPublic {
+		args = append(args, "--public")
+	} else {
+		args = append(args, "--private")
+	}
+
+	cmd := exec.Command("gh", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to create GitHub repo: %w", err)
+	}
+
+	// Create a .gitignore in workspace
+	workspaceGitignore := filepath.Join(workspacePath, ".gitignore")
+	gitignoreContent := `# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+
+# Dependencies (uncomment as needed)
+# node_modules/
+# vendor/
+# __pycache__/
+# *.pyc
+`
+	if err := os.WriteFile(workspaceGitignore, []byte(gitignoreContent), 0644); err != nil {
+		return fmt.Errorf("failed to create workspace .gitignore: %w", err)
+	}
+
+	// Create initial README in workspace
+	readmePath := filepath.Join(workspacePath, "README.md")
+	readmeContent := fmt.Sprintf("# %s\n\nProject created with [AgentBox](https://github.com/davidsenack/agentbox).\n", name)
+	if err := os.WriteFile(readmePath, []byte(readmeContent), 0644); err != nil {
+		return fmt.Errorf("failed to create README: %w", err)
+	}
+
+	// Stage and commit the initial files
+	gitAdd := exec.Command("git", "add", ".")
+	gitAdd.Dir = workspacePath
+	if err := gitAdd.Run(); err != nil {
+		return fmt.Errorf("failed to stage files: %w", err)
+	}
+
+	gitCommit := exec.Command("git", "commit", "-m", "Initial commit\n\nCreated with AgentBox")
+	gitCommit.Dir = workspacePath
+	if err := gitCommit.Run(); err != nil {
+		// Ignore if nothing to commit
+		if !strings.Contains(err.Error(), "nothing to commit") {
+			return fmt.Errorf("failed to commit: %w", err)
+		}
+	}
+
+	// Push to remote
+	gitPush := exec.Command("git", "push", "-u", "origin", "main")
+	gitPush.Dir = workspacePath
+	gitPush.Stdout = os.Stdout
+	gitPush.Stderr = os.Stderr
+	if err := gitPush.Run(); err != nil {
+		fmt.Printf("Warning: failed to push to remote: %v\n", err)
+		fmt.Println("You can push manually later with: git push -u origin main")
+	}
+
+	// Get the repo URL
+	getURL := exec.Command("gh", "repo", "view", name, "--json", "url", "-q", ".url")
+	urlOutput, err := getURL.Output()
+	if err == nil {
+		fmt.Printf("GitHub repo created: %s\n", strings.TrimSpace(string(urlOutput)))
+	}
 
 	return nil
 }
