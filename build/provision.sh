@@ -220,6 +220,11 @@ chmod 0440 /etc/sudoers.d/agentbox-secrets
 # opencode (install for agent user)
 sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; /usr/local/go/bin/go install github.com/opencode-ai/opencode@latest' || echo "Warning: opencode installation failed"
 
+# Gas Town (gt and bd CLIs)
+echo "Installing Gas Town..."
+sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; /usr/local/go/bin/go install github.com/steveyegge/gastown/cmd/gt@latest' || echo "Warning: gt installation failed"
+sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; /usr/local/go/bin/go install github.com/steveyegge/beads/cmd/bd@latest' || echo "Warning: bd installation failed"
+
 # --- Cleanup ---
 echo "Cleaning up..."
 apt-get clean
@@ -237,5 +242,5 @@ echo "=========================================="
 echo "Installed: zsh, oh-my-zsh, starship, tmux"
 echo "Installed: node $(node --version), python3, go"
 echo "Installed: neovim, ripgrep, fzf, jq, mise"
-echo "Installed: claude-code, opencode"
+echo "Installed: claude-code, opencode, gt, bd"
 echo "=========================================="

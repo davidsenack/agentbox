@@ -198,6 +198,7 @@ AgentBox VMs come ready to work with these tools pre-installed.
 **AI Coding Tools:**
 - claude-code (`claude` command)
 - opencode (`opencode` command)
+- Gas Town (`gt` and `bd` commands)
 
 ## Installing Additional Packages
 

@@ -325,6 +325,10 @@ NVIM
     # AI tools (install globally)
     npm install -g @anthropic-ai/claude-code 2>/dev/null || true
     sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH" GOPATH="$HOME/go"; go install github.com/opencode-ai/opencode@latest' 2>/dev/null || true
+
+    # Gas Town (gt and bd CLIs)
+    sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH" GOPATH="$HOME/go"; go install github.com/steveyegge/gastown/cmd/gt@latest' 2>/dev/null || true
+    sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH" GOPATH="$HOME/go"; go install github.com/steveyegge/beads/cmd/bd@latest' 2>/dev/null || true
 fi
 
 # --- Prompt config (runs for both pre-built and stock) ---
