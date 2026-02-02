@@ -131,6 +131,42 @@ func GenerateTemplate(cfg *config.Config, projectDir string) (string, error) {
 	return buf.String(), nil
 }
 
+// GenerateTemplateGasTown creates a Lima YAML template for Gas Town rigs
+// The workspace is mounted from crew/ directory instead of workspace/
+func GenerateTemplateGasTown(cfg *config.Config, rigDir string) (string, error) {
+	funcMap := template.FuncMap{
+		"indent": func(spaces int, v string) string {
+			return indent(spaces, v)
+		},
+	}
+
+	tmpl, err := template.New("lima").Funcs(funcMap).Parse(limaTemplateContent)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	provisionScript := generateProvisionScript(cfg)
+
+	data := struct {
+		Config          *config.Config
+		WorkspacePath   string
+		ArtifactsPath   string
+		ProvisionScript string
+	}{
+		Config:          cfg,
+		WorkspacePath:   filepath.Join(rigDir, "crew"),      // Gas Town uses crew/ for workspaces
+		ArtifactsPath:   filepath.Join(rigDir, "artifacts"),
+		ProvisionScript: provisionScript,
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
 func generateProvisionScript(cfg *config.Config) string {
 	return fmt.Sprintf(`#!/bin/bash
 set -euo pipefail

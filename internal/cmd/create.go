@@ -48,7 +48,12 @@ func init() {
 func runCreate(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
-	// Check if directory already exists
+	// Gas Town mode has different flow - create repo first, then let gt rig add handle directory
+	if createGasTown {
+		return runCreateGasTown(name)
+	}
+
+	// Standard mode: create local directory structure
 	if _, err := os.Stat(name); err == nil {
 		return fmt.Errorf("directory %q already exists", name)
 	}
@@ -91,25 +96,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create .gitignore: %w", err)
 	}
 
-	// Gas Town implies GitHub
-	if createGasTown {
-		createGitHub = true
-	}
-
 	// Create GitHub repo if requested
-	var repoURL string
 	if createGitHub {
-		var err error
-		repoURL, err = setupGitHubRepo(name)
-		if err != nil {
+		if _, err := setupGitHubRepo(name); err != nil {
 			return fmt.Errorf("failed to setup GitHub repo: %w", err)
-		}
-	}
-
-	// Register as Gas Town rig if requested
-	if createGasTown {
-		if err := setupGasTownRig(name, repoURL); err != nil {
-			return fmt.Errorf("failed to setup Gas Town rig: %w", err)
 		}
 	}
 
@@ -147,6 +137,116 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Next steps:\n")
 	fmt.Printf("  cd %s\n", name)
 	fmt.Printf("  agentbox enter %s\n", name)
+
+	return nil
+}
+
+// runCreateGasTown handles project creation for Gas Town mode
+// Flow: create GitHub repo -> gt rig add -> add agentbox config to rig
+func runCreateGasTown(name string) error {
+	fmt.Printf("Creating AgentBox + Gas Town project: %s\n", name)
+
+	// Check prerequisites
+	if _, err := exec.LookPath("gh"); err != nil {
+		return fmt.Errorf("gh CLI not found. Install with: brew install gh")
+	}
+	if _, err := exec.LookPath("gt"); err != nil {
+		return fmt.Errorf("gt CLI not found. Install Gas Town first")
+	}
+
+	// Check GitHub auth
+	authCheck := exec.Command("gh", "auth", "status")
+	if err := authCheck.Run(); err != nil {
+		return fmt.Errorf("not authenticated with GitHub. Run: gh auth login")
+	}
+
+	// Step 1: Create empty GitHub repo
+	fmt.Printf("Creating GitHub repository: %s\n", name)
+	args := []string{"repo", "create", name}
+	if createPublic {
+		args = append(args, "--public")
+	} else {
+		args = append(args, "--private")
+	}
+	// Add README so repo isn't empty
+	args = append(args, "--add-readme")
+
+	ghCreate := exec.Command("gh", args...)
+	ghCreate.Stdout = os.Stdout
+	ghCreate.Stderr = os.Stderr
+	if err := ghCreate.Run(); err != nil {
+		return fmt.Errorf("failed to create GitHub repo: %w", err)
+	}
+
+	// Get repo URL (SSH format for gt)
+	getURL := exec.Command("gh", "repo", "view", name, "--json", "sshUrl", "-q", ".sshUrl")
+	urlOutput, err := getURL.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get repo URL: %w", err)
+	}
+	repoURL := strings.TrimSpace(string(urlOutput))
+	fmt.Printf("GitHub repo created: %s\n", repoURL)
+
+	// Step 2: Register as Gas Town rig
+	fmt.Printf("Registering Gas Town rig: %s\n", name)
+	gtRigAdd := exec.Command("gt", "rig", "add", name, repoURL)
+	gtRigAdd.Stdout = os.Stdout
+	gtRigAdd.Stderr = os.Stderr
+	if err := gtRigAdd.Run(); err != nil {
+		return fmt.Errorf("failed to register Gas Town rig: %w", err)
+	}
+
+	// Step 3: Add agentbox config to the rig
+	// The rig is created in the current town, find it
+	rigPath := name // gt rig add creates it in cwd or town root
+
+	// Create .agentbox directory and artifacts in the rig
+	agentboxDir := filepath.Join(rigPath, ".agentbox")
+	artifactsDir := filepath.Join(rigPath, "artifacts")
+	if err := os.MkdirAll(agentboxDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .agentbox directory: %w", err)
+	}
+	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create artifacts directory: %w", err)
+	}
+
+	// Create default config - workspace points to crew/ directory
+	cfg := config.DefaultConfig()
+	if err := config.Save(rigPath, cfg); err != nil {
+		return fmt.Errorf("failed to save configuration: %w", err)
+	}
+
+	// Get absolute path for Lima template
+	absPath, err := filepath.Abs(rigPath)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	// Generate Lima template - workspace is crew/ for Gas Town rigs
+	limaTemplate, err := lima.GenerateTemplateGasTown(cfg, absPath)
+	if err != nil {
+		return fmt.Errorf("failed to generate Lima template: %w", err)
+	}
+
+	templatePath := filepath.Join(rigPath, ".agentbox", "lima.yaml")
+	if err := os.WriteFile(templatePath, []byte(limaTemplate), 0600); err != nil {
+		return fmt.Errorf("failed to write Lima template: %w", err)
+	}
+
+	// Create Lima VM
+	mgr := lima.NewManager()
+	vmName := lima.VMName(name)
+
+	fmt.Printf("Creating Lima VM: %s\n", vmName)
+	if err := mgr.Create(vmName, templatePath); err != nil {
+		return fmt.Errorf("failed to create Lima VM: %w", err)
+	}
+
+	fmt.Printf("\nAgentBox + Gas Town project created successfully!\n\n")
+	fmt.Printf("Next steps:\n")
+	fmt.Printf("  cd %s\n", name)
+	fmt.Printf("  agentbox enter %s\n", name)
+	fmt.Printf("\nGas Town rig is ready. Crew workspaces mount to /workspace in the VM.\n")
 
 	return nil
 }
@@ -269,29 +369,4 @@ Thumbs.db
 	}
 
 	return repoURL, nil
-}
-
-// setupGasTownRig registers the project as a Gas Town rig
-func setupGasTownRig(name, repoURL string) error {
-	// Check if gt CLI is available
-	if _, err := exec.LookPath("gt"); err != nil {
-		return fmt.Errorf("gt CLI not found. Install Gas Town first")
-	}
-
-	if repoURL == "" {
-		return fmt.Errorf("no repository URL available for Gas Town rig")
-	}
-
-	fmt.Printf("Registering Gas Town rig: %s\n", name)
-
-	// Run gt rig add
-	cmd := exec.Command("gt", "rig", "add", name, repoURL)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to register Gas Town rig: %w", err)
-	}
-
-	fmt.Printf("Gas Town rig registered: %s\n", name)
-	return nil
 }
