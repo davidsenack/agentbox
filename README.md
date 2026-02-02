@@ -163,7 +163,9 @@ cp ~/.ssh/repo_specific_key myproject/workspace/.ssh/
 
 ## Pre-installed Software
 
-AgentBox VMs come ready to work with these tools pre-installed:
+AgentBox VMs come ready to work with these tools pre-installed.
+
+> **Note:** On first VM creation, provisioning installs all software automatically. This takes a few minutes on the initial boot, but subsequent starts are fast. You can also build pre-provisioned images locally for instant boot (see [Building Pre-provisioned Images](#building-pre-provisioned-images)).
 
 **Shell & Terminal:**
 - zsh with Oh My Zsh
@@ -265,6 +267,32 @@ git clone https://github.com/davidsenack/agentbox
 cd agentbox
 go build -o agentbox ./cmd/agentbox
 ```
+
+## Building Pre-provisioned Images
+
+For faster VM creation, you can build pre-provisioned disk images locally:
+
+```bash
+# Clone the repo
+git clone https://github.com/davidsenack/agentbox
+cd agentbox
+
+# Build image for your architecture
+cd build
+./build-image.sh arm64   # For Apple Silicon Macs
+./build-image.sh amd64   # For Intel Macs
+
+# Images are created in build/output/
+ls output/
+# agentbox-ubuntu-24.04-arm64.qcow2
+# agentbox-ubuntu-24.04-arm64.qcow2.sha256
+```
+
+Pre-provisioned images reduce first-boot time from several minutes to under 30 seconds.
+
+To use a pre-built image, either:
+1. Upload it to a GitHub release (the template will auto-detect)
+2. Modify `internal/lima/template.go` to point to your image location
 
 ## Limitations
 
