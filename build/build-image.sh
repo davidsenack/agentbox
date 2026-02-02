@@ -67,6 +67,15 @@ provision:
     script: |
 $(sed 's/^/      /' "$SCRIPT_DIR/provision.sh")
 
+# Wait for provisioning to complete (marker file created by provision.sh)
+probes:
+  - mode: readiness
+    description: "Waiting for provisioning to complete"
+    script: |
+      #!/bin/bash
+      test -f /etc/agentbox-image
+    hint: "Provisioning is still running..."
+
 containerd:
   system: false
   user: false

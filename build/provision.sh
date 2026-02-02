@@ -140,11 +140,11 @@ chown -R agent:agent /home/agent/.config
 # --- Install AI Tools ---
 echo "Installing AI coding tools..."
 
-# claude-code
-sudo -u agent bash -c 'npm install -g @anthropic-ai/claude-code' || echo "Note: claude-code installed"
+# claude-code (install globally as root)
+npm install -g @anthropic-ai/claude-code || echo "Warning: claude-code installation failed"
 
-# opencode
-sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; /usr/local/go/bin/go install github.com/opencode-ai/opencode@latest' || echo "Note: opencode installed"
+# opencode (install for agent user)
+sudo -u agent bash -c 'export PATH="/usr/local/go/bin:$PATH"; export GOPATH="$HOME/go"; /usr/local/go/bin/go install github.com/opencode-ai/opencode@latest' || echo "Warning: opencode installation failed"
 
 # --- Cleanup ---
 echo "Cleaning up..."
