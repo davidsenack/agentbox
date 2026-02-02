@@ -169,6 +169,13 @@ func setupGitHubRepo(name string) (string, error) {
 
 	fmt.Printf("Creating GitHub repository: %s\n", name)
 
+	// Initialize git in workspace first
+	gitInit := exec.Command("git", "init")
+	gitInit.Dir = workspacePath
+	if err := gitInit.Run(); err != nil {
+		return "", fmt.Errorf("failed to initialize git: %w", err)
+	}
+
 	// Create the GitHub repo
 	args := []string{"repo", "create", name, "--source", workspacePath}
 	if createPublic {
