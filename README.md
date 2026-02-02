@@ -110,7 +110,7 @@ runtime: lima
 vm:
   cpus: 4
   memory: "4GiB"
-  disk: "20GiB"
+  disk: "30GiB"
 
 network:
   proxy_port: 3128

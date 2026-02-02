@@ -49,7 +49,7 @@ func DefaultConfig() *Config {
 		VM: VMConfig{
 			CPUs:   4,
 			Memory: "4GiB",
-			Disk:   "20GiB",
+			Disk:   "30GiB",
 		},
 		Network: NetworkConfig{
 			ProxyPort: 3128,
