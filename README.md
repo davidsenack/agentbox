@@ -1,8 +1,16 @@
 # AgentBox
 
-A terminal-first sandbox system for safe AI agent execution on macOS.
+**Isolated Linux sandboxes for AI agents on macOS.**
 
-AgentBox creates isolated Linux VMs where you can run arbitrary commands (including agentic tools like Gas Town, Claude Code, scripts) while protecting your host secrets.
+AgentBox creates secure, isolated Linux VMs where AI coding assistants (Claude Code, Cursor, Aider, etc.) can run with full capabilities while your host machine's secrets remain protected. Your SSH keys, AWS credentials, and API tokens never enter the sandbox - even when the agent has full network access.
+
+**Key features:**
+- 🔒 **Host secrets protected** - SSH keys, AWS creds, API keys never enter the VM
+- 🌐 **Full network access** - Agents can clone repos, install packages, deploy code
+- 🔑 **Transparent API auth** - Anthropic API key injected by proxy, invisible to agent
+- ⚡ **Fast startup** - Pre-built images boot in under 30 seconds
+- 🛠️ **Batteries included** - Node, Python, Go, Claude Code, and more pre-installed
+- 🏭 **Gas Town integration** - Optional multi-agent workspace support
 
 ## Quick Start
 
@@ -357,4 +365,4 @@ secrets:
 
 ## License
 
-MIT
+MIT License - see [LICENSE](LICENSE) for details.
