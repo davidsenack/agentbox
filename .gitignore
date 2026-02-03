@@ -3,3 +3,4 @@ plugins/
 /agentbox
 testbox/
 *.log
+.beads/
